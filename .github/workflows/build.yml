@@ -2,7 +2,8 @@ name: Build Windows installer
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]      # test build: installer is attached to the run
+    tags: ["v*"]          # release: installer is also attached to the GitHub release
   workflow_dispatch:
 
 jobs:
