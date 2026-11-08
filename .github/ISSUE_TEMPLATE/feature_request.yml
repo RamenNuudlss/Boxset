@@ -1,0 +1,16 @@
+name: Idea or request
+description: Something Boxset could do, or a theme you'd like
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like Boxset to do?
+      placeholder: Keep the subtitles from my files on the disc.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What would it help you make?
+      placeholder: A collection of foreign films where subtitles are essential.

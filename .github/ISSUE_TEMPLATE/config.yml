@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Read the troubleshooting guide
+    url: https://github.com/RamenNuudlss/Boxset#troubleshooting
+    about: Answers to the most common problems, from blank windows to discs that won't play.

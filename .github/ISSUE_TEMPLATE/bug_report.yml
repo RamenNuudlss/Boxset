@@ -1,0 +1,69 @@
+name: Something isn't working
+description: A problem with the app, a build, or a disc on a player
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. The details below make it much quicker to find the cause.
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does it go wrong?
+      options:
+        - In the app (adding films, menus, settings)
+        - During a build
+        - Making the disc image or burning
+        - On a Blu-ray player
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      placeholder: On my player, pressing OK on "Scene selection" does nothing. I expected the scene grid.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to make it happen
+      placeholder: |
+        1. Add 4 films
+        2. Pick the Marquee theme
+        3. Build, burn, open "Pick a feature"
+  - type: input
+    id: version
+    attributes:
+      label: Boxset version
+      description: Shown in Settings → Apps, or the installer's file name.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: theme
+    attributes:
+      label: Theme
+      placeholder: Tachometer
+  - type: input
+    id: player
+    attributes:
+      label: Blu-ray player or app (for disc problems)
+      placeholder: Sony UBP-X700, firmware M35.R.0469
+  - type: input
+    id: disc
+    attributes:
+      label: Disc type and how you burned it
+      placeholder: BD-RE 25 GB, Windows Disc Image Burner
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+  - type: textarea
+    id: details
+    attributes:
+      label: Error message or details
+      description: For build problems, open "Details" on the Build tab and paste what it says. Screenshots are welcome.
+      render: text
