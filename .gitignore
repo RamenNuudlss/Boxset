@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+build/
+dist/
+testmedia/
+packaging/MicrosoftEdgeWebview2Setup.exe
+*.boxset.tmp
+.boxset-theme-try.json

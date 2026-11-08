@@ -1,0 +1,6 @@
+{
+  "name": "Smoke test",
+  "theme": "tachometer",
+  "disc_size": "BD-50",
+  "films": [{"file": "missing.mkv", "title": "Smoke test", "year": 2000}]
+}

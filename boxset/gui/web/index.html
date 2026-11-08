@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boxset</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="ident">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="15" class="mark-disc"/>
+        <circle cx="16" cy="16" r="10.5" class="mark-data"/>
+        <circle cx="16" cy="16" r="5" class="mark-clamp"/>
+        <circle cx="16" cy="16" r="2.2" class="mark-hole"/>
+      </svg>
+      <div class="ident-text">
+        <input id="projectName" class="project-name" aria-label="Collection name" spellcheck="false">
+        <div class="project-meta">
+          <button class="linkish" id="projectMenuBtn" aria-haspopup="menu" aria-expanded="false">Project</button>
+          <span id="projectWhere" class="where"></span>
+        </div>
+        <div class="menu-pop" id="projectMenu" role="menu" hidden>
+          <button role="menuitem" data-act="new">New collection</button>
+          <button role="menuitem" data-act="open">Open project…</button>
+          <button role="menuitem" data-act="saveas">Save project as…</button>
+          <button role="menuitem" data-act="folder">Show project folder</button>
+          <div class="menu-sep" id="recentSep"></div>
+          <div id="recentList"></div>
+        </div>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Steps">
+      <button role="tab" class="tab" data-view="films" aria-selected="true">Films <span class="tab-count" id="filmCount"></span></button>
+      <button role="tab" class="tab" data-view="menu" aria-selected="false">Menu</button>
+      <button role="tab" class="tab" data-view="build" aria-selected="false">Build</button>
+    </nav>
+    <div class="top-actions">
+      <button class="btn primary" id="primaryAction">Build disc</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="view" id="view-films" role="tabpanel"></section>
+    <section class="view" id="view-menu" role="tabpanel" hidden></section>
+    <section class="view" id="view-build" role="tabpanel" hidden></section>
+  </main>
+
+  <div class="drop-veil" id="dropVeil" hidden><div>Drop to add these movies</div></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

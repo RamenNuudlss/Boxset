@@ -1,0 +1,4 @@
+pillow>=10
+playwright>=1.40
+pywebview>=5.1
+bdmvkit==0.7.0

@@ -1,0 +1,70 @@
+name: Build Windows installer
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Version from tag
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF_TYPE" == "tag" ]] || v="0.0.0-dev"
+          echo "APP_VERSION=$v" >> $GITHUB_ENV
+
+      - name: Build the app
+        run: pyinstaller --noconfirm packaging/boxset.spec
+
+      - name: Bundle FFmpeg (GPL build with x264)
+        shell: pwsh
+        run: |
+          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          Invoke-WebRequest $url -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg
+          $bin = Get-ChildItem ffmpeg -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          New-Item -ItemType Directory -Force dist/Boxset/bin | Out-Null
+          Copy-Item $bin.FullName dist/Boxset/bin/
+          Copy-Item (Join-Path $bin.DirectoryName "ffprobe.exe") dist/Boxset/bin/
+          $lic = Get-ChildItem ffmpeg -Recurse -Filter LICENSE* | Select-Object -First 1
+          if ($lic) { Copy-Item $lic.FullName dist/Boxset/bin/FFMPEG-LICENSE.txt }
+          Copy-Item THIRD_PARTY_NOTICES.md dist/Boxset/
+
+      - name: Fetch the WebView2 installer (used only on PCs that lack it)
+        shell: pwsh
+        run: Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile packaging/MicrosoftEdgeWebview2Setup.exe
+
+      - name: Smoke test
+        run: |
+          dist\Boxset\boxset-cli.exe themes packaging\smoke.boxset
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:APP_VERSION" packaging/installer.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BoxsetSetup
+          path: dist/BoxsetSetup-*.exe
+
+      - name: Attach to the GitHub release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/BoxsetSetup-*.exe
