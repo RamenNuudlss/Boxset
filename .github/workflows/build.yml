@@ -6,6 +6,9 @@ on:
     tags: ["v*"]          # release: installer is also attached to the GitHub release
   workflow_dispatch:
 
+permissions:
+  contents: write     # lets the release step attach the installer
+
 jobs:
   windows:
     runs-on: windows-latest

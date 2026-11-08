@@ -14,6 +14,7 @@
   <a href="https://github.com/RamenNuudlss/Boxset/actions/workflows/build.yml"><img alt="Windows build" src="https://github.com/RamenNuudlss/Boxset/actions/workflows/build.yml/badge.svg"></a>
   <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-3A3D45">
   <img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-3A3D45">
+  <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-3A3D45"></a>
 </p>
 
 <p align="center">
@@ -699,8 +700,8 @@ Licences for everything bundled with Boxset are listed in
 GPL; its source is available from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/), the
 build Boxset bundles.
 
-Boxset's own licence hasn't been chosen yet. Until one is added, the code is published
-for viewing, and all rights are reserved.
+Boxset itself is released under the [MIT licence](LICENSE): use it, change it and share
+it freely, keeping the copyright notice.
 
 Boxset works with video files you already have. It doesn't rip, copy or decrypt discs.
 Please respect copyright law where you live.
