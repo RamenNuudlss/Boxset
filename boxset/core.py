@@ -215,6 +215,15 @@ class Context:
         import html as _h
         return _h.escape(str(s if s is not None else ""))
 
+    def story_order(self, order) -> list[int] | None:
+        """An 'order' setting as a list of film numbers, or None when it's unset, just
+        release order, or out of date (films were added or removed since it was set)."""
+        n = len(self.films)
+        if not isinstance(order, (list, tuple)) or sorted(order) != list(range(1, n + 1)):
+            return None
+        order = [int(x) for x in order]
+        return None if order == list(range(1, n + 1)) else order
+
     @staticmethod
     def pages(items, per_page):
         return [items[i:i + per_page] for i in range(0, len(items), per_page)]

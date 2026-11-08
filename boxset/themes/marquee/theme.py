@@ -196,8 +196,7 @@ class Theme(BaseTheme):
         self.n = len(films)
         if self.n > 11:
             raise RuntimeError("The Marquee letterboard fits up to 11 films.")
-        order = o.get("timeline_order") or ctx.collection.timeline_order
-        timeline = order if order and list(order) != list(range(1, self.n + 1)) else None
+        timeline = ctx.story_order(o.get("timeline_order") or ctx.collection.timeline_order)
         ctx.playlist("release", list(range(1, self.n + 1)))
         if timeline:
             ctx.playlist("timeline", timeline)

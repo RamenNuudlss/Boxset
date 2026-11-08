@@ -58,6 +58,11 @@ def cmd_check(args):
     say()
     if len(media) == len(coll.films):
         say(budget.plan(coll.disc_size, [m.duration for m in media.values()], coll.audio_kbps).describe())
+    notes = [(f.number, p) for f in coll.films if f.number in media for p in media[f.number].problems]
+    if notes:
+        say("\nGood to know:")
+        for n, p in notes:
+            say(f"  - Film {n}: {p}")
     if problems:
         say("\nThings to fix:")
         for n, p in problems:

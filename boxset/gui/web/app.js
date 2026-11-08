@@ -57,6 +57,8 @@ function saveOpts() { try { localStorage.setItem("boxset.build", JSON.stringify(
 const fmtRun = (s) => { if (!s) return "–"; const m = Math.round(s / 60); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`; };
 const fmtLong = (s) => { const m = Math.round((s || 0) / 60); const h = Math.floor(m / 60); return h ? `${h} hr ${m % 60} min` : `${m} min`; };
 const gb = (b) => (b / 1e9).toFixed(1);
+// whole percentages are too coarse at the start of a day-long build
+const pctText = (f) => { const p = (f || 0) * 100; return (p > 0 && p < 10 ? p.toFixed(1) : Math.floor(p)) + "%"; };
 function fmtEta(s) {
   if (s == null || !isFinite(s)) return "";
   if (s < 60) return "under a minute left";
@@ -139,12 +141,12 @@ function discSvg({ segments, capacity, reserve, written = null, highlight = null
     if (highlight != null) op = s.index === highlight ? 1 : .32;
     if (written != null) {
       const wf = written;                                   // fraction of disc written
-      if (wf <= a) op = .22; else if (wf < b) op = 1;
+      if (wf <= a) op = .13; else if (wf < b) op = 1;
     }
     out += ring(rad(a), rad(b), s.color, `opacity="${op}"`);
     if (written != null && written > a && written < b) {
       // the part not yet written fades back
-      out += ring(rad(written), rad(b), "#2A2C32", 'opacity=".72"');
+      out += ring(rad(written), rad(b), "#2A2C32", 'opacity=".82"');
     }
     out += `<circle cx="${c}" cy="${c}" r="${rad(b).toFixed(2)}" fill="none" stroke="#2A2C32" stroke-width=".9"/>`;
     f = b;
@@ -180,7 +182,9 @@ function filmSegments() {
 function renderHeader() {
   const name = $("#projectName");
   if (document.activeElement !== name) name.value = S.project.name || "Untitled collection";
-  $("#projectWhere").textContent = S.folder ? S.folder : "Not saved yet. Adding a film saves it to Documents\\Boxset.";
+  const where = $("#projectWhere");
+  where.textContent = S.folder ? S.folder_display : "Not saved yet. Adding a film saves it in Documents, in a Boxset folder.";
+  where.title = S.folder || "";
   const n = S.project.films.length;
   $("#filmCount").textContent = n ? n : "";
   $$(".tab").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.view === view)));
@@ -249,7 +253,7 @@ function filmRow(f, i) {
     <input class="cell-input year-input" data-field="year" value="${esc(f.year ?? "")}" inputmode="numeric" maxlength="4" placeholder="—" aria-label="Year">
     <span class="dim-cell">${m && !m.error ? fmtRun(m.duration) : ""}</span>
     <span class="dim-cell">${m && !m.error ? m.chapters : ""}</span>
-    <span class="audio-cell">${m && !m.error ? esc(m.audio) : (m && m.error ? '<span class="problem err">Can\'t read</span>' : '<span class="faint">Reading…</span>')}</span>
+    <span class="audio-cell">${m && !m.error ? esc(m.audio) : (m && m.error ? '<span class="problem err">Can\'t use</span>' : '<span class="faint">Reading…</span>')}</span>
     <button class="icon-btn" data-toggle aria-label="More about this film" aria-expanded="${open}">${status || ICON.chev}</button>
   </div>`;
   if (open) row += filmDetail(f, i, m);
@@ -510,11 +514,10 @@ function renderBuild() {
       written = Math.max(0.0001, w / cap);
     }
   }
-  const pct = Math.round((j.overall || 0) * 100);
   const encoding = j.stages.encode && j.stages.encode.status === "start";
   const etaAll = encoding ? overallEta() : null;
   let caption;
-  if (j.running && isBuild) caption = `<div class="big">${encoding ? pct + "%" : esc(stageLabel())}</div><div class="sub">${encoding ? esc(fmtEta(etaAll) || "Encoding films") : "Working"}</div>`;
+  if (j.running && isBuild) caption = `<div class="big">${encoding ? pctText(j.overall) : esc(stageLabel())}</div><div class="sub">${encoding ? esc(fmtEta(etaAll) || "Encoding films") : "Working"}</div>`;
   else if (j.result && isBuild) caption = `<div class="big">Disc ready</div><div class="sub">${j.result.bytes ? gb(j.result.bytes) + " GB, " : ""}${j.result.titles || films.length} films, ${j.result.chapters || ""} chapters</div>`;
   else if (j.error && isBuild) caption = `<div class="big">${j.error === "Cancelled" ? "Build stopped" : "Build failed"}</div><div class="sub">${j.error === "Cancelled" ? "Finished films are kept and won't be encoded again." : "See the details on the right."}</div>`;
   else caption = `<div class="big">${films.length ? gb(segs.reduce((a, s) => a + s.bytes, 0) + reserve) + " GB" : "Nothing to build yet"}</div><div class="sub">${films.length ? `${films.length} films on a ${S.project.disc_size}` : "Add films first"}</div>`;
@@ -584,7 +587,7 @@ function stepsPanel(segs) {
       <li class="step ${cls("check")}"><span class="mark-s"></span><div><div class="s-title">Check films</div><div class="s-sub">${esc(sub("check", "Read every file and plan the disc space"))}</div></div><span class="s-right"></span></li>
       <li class="step ${cls("menus")}"><span class="mark-s"></span><div><div class="s-title">Render menus</div><div class="s-sub">${esc(sub("menus", "Skipped when nothing changed"))}</div></div><span class="s-right"></span></li>
       <li class="step ${cls("encode")}"><span class="mark-s"></span><div><div class="s-title">Encode films</div><div class="s-sub">${esc(sub("encode", "The long part. Finished films are kept if you stop."))}</div>
-        <div class="film-progress">${filmRows}</div></div><span class="s-right">${st.encode && st.encode.status === "start" ? `${Math.round((j.overall || 0) * 100)}%` : ""}</span></li>
+        <div class="film-progress">${filmRows}</div></div><span class="s-right">${st.encode && st.encode.status === "start" ? pctText(j.overall) : ""}</span></li>
       <li class="step ${cls("assemble")}"><span class="mark-s"></span><div><div class="s-title">Write the disc</div><div class="s-sub">${esc(sub("assemble", "Menus, chapters and playlists into a Blu-ray folder"))}</div></div><span class="s-right"></span></li>
       ${showIso ? `<li class="step ${cls("iso")}"><span class="mark-s"></span><div><div class="s-title">Disc image</div><div class="s-sub">${esc(sub("iso", "One .iso file, ready to burn"))}</div></div><span class="s-right"></span></li>` : ""}
     </ol>

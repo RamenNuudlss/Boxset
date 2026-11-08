@@ -65,8 +65,7 @@ class Theme(BaseTheme):
         self.title_small = o.get("title_small", "THE COMPLETE")
         self.title_big = o.get("title_big", "COLLECTION")
         self.scenes = bool(o.get("scene_selection", True))
-        order = o.get("timeline_order") or ctx.collection.timeline_order
-        self.timeline = order if order and list(order) != list(range(1, self.n + 1)) else None
+        self.timeline = ctx.story_order(o.get("timeline_order") or ctx.collection.timeline_order)
         years = [f.year for f in self.films if f.year]
         self.years = (min(years), max(years)) if years else None
 

@@ -33,7 +33,8 @@ class Media:
     height: int
     chapters: list[float] = field(default_factory=list)  # start times in seconds
     audio: list[AudioStream] = field(default_factory=list)
-    problems: list[str] = field(default_factory=list)
+    problems: list[str] = field(default_factory=list)   # warnings: handled, but worth knowing
+    fatal: list[str] = field(default_factory=list)      # can't go on a Blu-ray as it is
 
     @property
     def fps_label(self) -> str:
@@ -89,13 +90,13 @@ def probe(path: str) -> Media:
     m = Media(path=path, duration=duration, fps=fps, width=int(video.get("width", 0)),
               height=int(video.get("height", 0)), chapters=clean, audio=audio)
     if fps not in BLURAY_FPS:
-        m.problems.append(f"frame rate {float(fps):.3f} isn't a Blu-ray rate")
+        m.fatal.append(f"{float(fps):.3f} fps can't go on a Blu-ray (it takes 23.976, 24, 25 or 29.97)")
     elif m.fps_label == "24":
-        m.problems.append("true 24 fps isn't supported by the disc builder; it will be slowed to 23.976")
+        m.problems.append("24 fps will be converted to 23.976 for the disc (an occasional frame is dropped)")
     if not audio:
-        m.problems.append("no audio track")
+        m.problems.append("no audio track, so the disc will play silence")
     if duration <= 0:
-        m.problems.append("couldn't read the running time")
+        m.fatal.append("couldn't read the running time")
     return m
 
 

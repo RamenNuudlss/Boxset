@@ -180,6 +180,8 @@ class Api:
         paths = [p for p in (paths or []) if p]
         added = self.project.add_files(paths)
         if added:
+            self._clear_order_option()
+            self.project.data["timeline_order"] = None
             self._changed()
             self._probe_missing()
         self.push({"type": "films", "added": len(added)})
@@ -286,6 +288,7 @@ class Api:
             "project": {k: v for k, v in d.items() if not k.startswith("_")},
             "path": self.project.path,
             "folder": os.path.dirname(self.project.path) if self.project.path else None,
+            "folder_display": self._short(os.path.dirname(self.project.path)) if self.project.path else None,
             "meta": {f["file"]: self.meta.get(f["file"]) for f in self.project.films},
             "themes": themes,
             "plan": self._plan(),
@@ -296,6 +299,16 @@ class Api:
             "windows": sys.platform == "win32",
             "recent": self.recent(),
         }
+
+    @staticmethod
+    def _short(path):
+        """A folder as people think of it: relative to their user folder when inside it."""
+        home = os.path.expanduser("~")
+        try:
+            rel = os.path.relpath(path, home)
+        except ValueError:          # another drive on Windows
+            return path
+        return path if rel.startswith("..") else rel
 
     def _coll_stub(self):
         class _C:

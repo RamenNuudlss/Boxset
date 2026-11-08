@@ -70,9 +70,10 @@ class Job:
 # --------------------------------------------------------------------- reading
 
 def load_media(coll, job: Job | None = None, refresh=False):
-    """Probe every rip (cached by path, size and date). Returns (media, problems)."""
+    """Probe every rip (cached by path, size and date). Returns (media, problems), where
+    problems are the things that stop a build. Warnings are logged to the job."""
     os.makedirs(coll.build, exist_ok=True)
-    cache_p = os.path.join(coll.build, "probe.cache")
+    cache_p = os.path.join(coll.build, "probe2.cache")
     cache = {}
     if os.path.exists(cache_p) and not refresh:
         try:
@@ -96,8 +97,11 @@ def load_media(coll, job: Job | None = None, refresh=False):
             continue
         cache[key] = m
         media[film.number] = m
+        for p in getattr(m, "fatal", []):
+            problems.append((film.number, p[0].upper() + p[1:]))
         for p in m.problems:
-            problems.append((film.number, p.capitalize()))
+            if job:
+                job.log(f"{film.title}: {p}", "warn")
     with open(cache_p, "wb") as fh:
         pickle.dump(cache, fh)
     return media, problems
@@ -110,7 +114,7 @@ def probe_one(path: str) -> dict:
     return {"duration": m.duration, "chapters": len(m.chapters), "fps": m.fps_label,
             "width": m.width, "height": m.height, "size": os.path.getsize(path),
             "audio": f"{a.codec.upper()} {a.channels}ch" if a else "No audio",
-            "problems": m.problems}
+            "problems": m.problems, **({"error": m.fatal[0][0].upper() + m.fatal[0][1:]} if m.fatal else {})}
 
 
 # --------------------------------------------------------------------- menus
@@ -267,13 +271,33 @@ def encode_film(job: Job, coll, film, media, plan, out, fast, on_progress):
         raise RuntimeError(f"Encoding {film.title} failed:\n" + "\n".join(err_lines[-8:]))
 
 
+def clip_path(coll, media) -> str:
+    """Encoded films are stored by source file, not disc position, so reordering
+    films or editing their titles never re-encodes anything."""
+    key = hashlib.sha1(os.path.normcase(os.path.abspath(media.path)).encode("utf-8")).hexdigest()[:16]
+    return os.path.join(coll.build, "clips", f"{key}.m2ts")
+
+
+def _tidy_clips(coll, media):
+    """Remove encoded films that are no longer part of the project."""
+    keep = {os.path.basename(clip_path(coll, media[f.number])) for f in coll.films}
+    d = os.path.join(coll.build, "clips")
+    for n in os.listdir(d) if os.path.isdir(d) else []:
+        base = n[:-5] if n.endswith(".json") else n[:-5] if n.endswith(".part") else n
+        if base not in keep:
+            try:
+                os.remove(os.path.join(d, n))
+            except OSError:
+                pass
+
+
 def encode_all(coll, media, job: Job, plan, fast=False) -> dict[int, str]:
     clips_dir = os.path.join(coll.build, "clips")
     os.makedirs(clips_dir, exist_ok=True)
     total = sum(media[f.number].duration for f in coll.films)
     todo, clips = [], {}
     for film in coll.films:
-        clip = os.path.join(clips_dir, f"film{film.number:02d}.m2ts")
+        clip = clip_path(coll, media[film.number])
         clips[film.number] = clip
         want = _clip_settings(coll, media[film.number], plan, fast)
         meta = clip + ".json"
@@ -386,7 +410,7 @@ def run(collection_path: str, job: Job, menus_only=False, skip_encode=False, fas
         return {"manifest": manifest}
     job.check()
     if skip_encode:
-        clips = {f.number: os.path.join(coll.build, "clips", f"film{f.number:02d}.m2ts") for f in coll.films}
+        clips = {f.number: clip_path(coll, media[f.number]) for f in coll.films}
         missing = [f.title for f in coll.films if not os.path.exists(clips[f.number])]
         if missing:
             raise RuntimeError("Not encoded yet: " + ", ".join(missing))
@@ -394,6 +418,7 @@ def run(collection_path: str, job: Job, menus_only=False, skip_encode=False, fas
         clips = encode_all(coll, media, job, plan, fast)
     job.check()
     result = assemble(coll, media, manifest, clips, job, fast)
+    _tidy_clips(coll, media)
     if result["bytes"] > plan.capacity:
         job.log(f"The disc is {result['bytes'] / 1e9:.1f} GB, more than a {coll.disc_size} holds.", "warn")
     if make_iso:
