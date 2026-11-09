@@ -79,6 +79,7 @@ _BUTTONS_JS = r"""
   return {
     id: b.dataset.button, action: b.dataset.action || '',
     default: b.hasAttribute('data-default'),
+    auto: b.hasAttribute('data-auto'),
     nav: Object.fromEntries(['up','down','left','right']
           .filter(d => b.getAttribute('data-nav-' + d))
           .map(d => [d, b.getAttribute('data-nav-' + d)])),
@@ -187,7 +188,7 @@ class HtmlRenderer:
                 crops = {st: c.crop((bl, bt, br, bb)) for st, c in crops.items()}
                 l, t = l + bl, t + bt
             buttons.append({"id": b["id"], "x": l, "y": t, "images": crops, "action": b["action"],
-                            "nav": b["nav"], "default": b["default"]})
+                            "nav": b["nav"], "default": b["default"], "auto": b.get("auto", False)})
         return background, buttons
 
     def record(self, name: str, seconds: float, fps=(24000, 1001)) -> str:
@@ -228,7 +229,8 @@ class HtmlRenderer:
             background = self.record(menu_id, animate)
         m = self.ctx.menu(menu_id, background, music=music, loop_seconds=animate)
         for b in buttons:
-            m.button(b["id"], b["x"], b["y"], b["images"], b["action"], b["nav"], default=b["default"])
+            m.button(b["id"], b["x"], b["y"], b["images"], b["action"], b["nav"], default=b["default"],
+                     auto=b.get("auto", False))
         return m
 
     def image(self, html: str, width: int, height: int, transparent: bool = True) -> Image.Image:

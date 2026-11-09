@@ -104,6 +104,7 @@ class Button:
     images: dict          # state -> PIL.Image (RGBA)
     action: str
     nav: dict = field(default_factory=dict)
+    auto: bool = False    # runs its action as soon as it's selected (no OK needed)
 
     @property
     def w(self):
@@ -124,9 +125,10 @@ class Menu:
         self.buttons: list[Button] = []
         self.default: str | None = None
 
-    def button(self, bid, x, y, images: dict, action: str, nav: dict | None = None, default=False):
+    def button(self, bid, x, y, images: dict, action: str, nav: dict | None = None, default=False, auto=False):
         """Add a button. images needs 'normal' and 'selected'; 'activated' falls back to selected.
-        All states are padded to one shared size so they line up exactly."""
+        All states are padded to one shared size so they line up exactly. An `auto` button
+        runs its action the moment it's selected, e.g. to flip to another page."""
         imgs = {}
         for st in STATES:
             im = images.get(st) or images.get("selected")
@@ -152,9 +154,9 @@ class Menu:
             r, btm = max(bx[2] for bx in boxes), max(bx[3] for bx in boxes)
             imgs = {st: im.crop((l, t, r, btm)) for st, im in imgs.items()}
             x, y = x + l, y + t
-        b = Button(bid, round(x), round(y), imgs, action, dict(nav or {}))
+        b = Button(bid, round(x), round(y), imgs, action, dict(nav or {}), bool(auto))
         self.buttons.append(b)
-        if default or self.default is None:
+        if default or (self.default is None and not auto):
             self.default = bid
         return b
 
@@ -435,6 +437,9 @@ def validate(ctx: Context) -> tuple[list[str], list[str]]:
             errors.append(f"{where}: duplicate button ids {sorted(dup)}")
         if m.default not in ids:
             errors.append(f"{where}: default button '{m.default}' doesn't exist")
+        elif next(b for b in m.buttons if b.id == m.default).auto:
+            errors.append(f"{where}: the default button '{m.default}' acts on its own as soon as it's selected, "
+                          f"so the menu would leave the moment it opens")
         for b in m.buttons:
             bw = f"{where}, button '{b.id}'"
             if b.x < 0 or b.y < 0 or b.x + b.w > FRAME_W or b.y + b.h > FRAME_H:
@@ -564,7 +569,7 @@ def write_manifest(ctx: Context) -> dict:
                 flat[i * 3 + k].save(p, optimize=True)
                 files[st] = rel(p)
             buttons.append({"id": b.id, "x": b.x, "y": b.y, "w": b.w, "h": b.h, **files,
-                            "action": b.action, "nav": b.nav})
+                            "action": b.action, "nav": b.nav, "auto": b.auto})
         menus.append({"id": m.id, "background": rel(bg), "music": rel(music) if music else None,
                       "loop_seconds": m.loop_seconds, "default_button": m.default, "buttons": buttons})
     home = f"menu:{ctx.first}"

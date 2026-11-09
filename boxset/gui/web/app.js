@@ -80,6 +80,7 @@ function quality(kbps) {
 function menuLabel(id) {
   let m;
   if (id === "main") return "Main menu";
+  if ((m = id.match(/^main(\d+)$/))) return `Main menu, ${filmTitle(+m[1])} in front`;
   if (/^(films|board|list)$/.test(id)) return "Film list";
   if ((m = id.match(/^film(\d+)$/))) return `Film ${+m[1]}: ${filmTitle(+m[1])}`;
   if ((m = id.match(/^(?:ch|sc)(\d+)p(\d+)$/))) return `Film ${+m[1]} scenes, page ${m[2]}`;
@@ -442,7 +443,13 @@ function simMove(dir) {
     }
     target = best && best.id;
   }
-  if (target) { sim.sel = target; updateButtons(); }
+  if (target) {
+    sim.sel = target;
+    updateButtons();
+    // an auto button acts the moment it's selected, as it will on the disc
+    const t = m.buttons.find((b) => b.id === target);
+    if (t && t.auto) setTimeout(() => runAction(t.action), 120);
+  }
 }
 
 function simEnter(bid) {

@@ -440,7 +440,8 @@ def assemble(coll, media, manifest, clips, job: Job, fast=False) -> dict:
     for mn in manifest["menus"]:
         job.check()
         buttons = [MenuButton(b["id"], b["x"], b["y"], selected=p(b["selected"]), activated=p(b["activated"]),
-                              normal=p(b["normal"]), action=b["action"], nav=b["nav"]) for b in mn["buttons"]]
+                              normal=p(b["normal"]), action=b["action"], nav=b["nav"], auto=bool(b.get("auto")))
+                   for b in mn["buttons"]]
         disc.add_menu(mn["id"], p(mn["background"]), buttons, fps=menu_fps,
                       default=mn["default_button"], music=p(mn.get("music")))
     try:

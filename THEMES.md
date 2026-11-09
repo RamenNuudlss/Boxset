@@ -174,6 +174,7 @@ Mark each button with attributes:
 | `data-default` | Highlighted when the menu opens (otherwise the first button) |
 | `data-nav-up`, `-down`, `-left`, `-right` | Button id the arrow key goes to. Leave out for "nearest in that direction" |
 | `data-pad="24"` | Extra pixels captured around the element, for glows and shadows |
+| `data-auto` | Runs the action as soon as the button is selected, without OK. Use it to flip between pages (the Encore theme's Cover Flow moves this way). Can't be the default button |
 
 Style the three states on the button element:
 
@@ -217,6 +218,7 @@ m.default = "play"
   `activated` falls back to `selected` when left out.
 - `m.chain(ids, axis="horizontal")` links left and right instead.
 - `m.get(id).nav["right"] = "back"` sets a single direction by hand.
+- `m.button(..., auto=True)` makes a button act the moment it's selected.
 
 `boxset/draw.py` has the helpers the Tachometer theme uses: anti-aliased shapes,
 letter-spaced text, slanted boxes and the dial.
