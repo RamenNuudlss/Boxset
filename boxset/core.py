@@ -175,8 +175,10 @@ class Menu:
 
 
 class Context:
-    def __init__(self, coll, films: list[FilmInfo], theme_dir: str, out_dir: str, options: dict, log=print):
+    def __init__(self, coll, films: list[FilmInfo], theme_dir: str, out_dir: str, options: dict, log=print,
+                 check=None):
         self.collection = coll
+        self.check = check or (lambda: None)     # raises when the user stops the job
         self.films = films
         self.theme_dir = theme_dir
         self.out = out_dir

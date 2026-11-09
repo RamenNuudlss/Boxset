@@ -206,6 +206,7 @@ class HtmlRenderer:
             stdin=subprocess.PIPE)
         try:
             for i in range(frames):
+                self.ctx.check()             # Stop works mid-recording
                 pg.evaluate(_FREEZE_JS, i * 1000 * den / num)
                 proc.stdin.write(pg.screenshot(type="jpeg", quality=93))
                 if i and i % 120 == 0:
@@ -222,6 +223,7 @@ class HtmlRenderer:
              base: str | None = None):
         """Render an HTML screen straight into a menu: background (still or recorded
         animation), every marked button, actions and navigation."""
+        self.ctx.check()
         bg, buttons = self.capture(menu_id, html, base)
         background = bg
         if animate:

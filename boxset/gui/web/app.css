@@ -429,3 +429,5 @@ details summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
 .burner-msg.warn i { background: #E9B65C; }
 .burner-msg.stop i { background: var(--err); }
 .result .burner { margin-top: 12px; }
+
+.stage-actions { display: flex; gap: 8px; align-items: center; }

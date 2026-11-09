@@ -10,6 +10,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -498,6 +499,33 @@ class Api:
 
     def render_menus(self, force: bool = False):
         return self._start("menus", menus_only=True, force_menus=bool(force))
+
+    def cancel_render(self):
+        """Stop a menu render (the Stop button next to Render menus)."""
+        if self.status.get("running") and self.status.get("kind") == "menus" and self.job:
+            self.job.cancel()
+        return self.state()
+
+    def clear_menus(self):
+        """Delete the rendered menus so the next render starts from nothing. Chapter
+        frames are kept; they only depend on the films."""
+        self._busy_guard()
+        if not self.project.path:
+            return self.state()
+        build = self.project.build_dir
+        removed = 0
+        for rel in ("menus.json", "menus_preview.jpg"):
+            p = os.path.join(build, rel)
+            if os.path.exists(p):
+                os.remove(p)
+                removed += 1
+        for rel in ("menus", "html"):
+            p = os.path.join(build, rel)
+            if os.path.isdir(p):
+                shutil.rmtree(p, ignore_errors=True)
+                removed += 1
+        self.push({"type": "toast", "message": "Rendered menus cleared" if removed else "No rendered menus to clear"})
+        return self.state()
 
     def build(self, opts: dict | None = None):
         opts = opts or {}

@@ -258,9 +258,16 @@ different order from their release order. Settings are saved per project.
 
 **Render menus.** Builds every screen from your actual films and chapters, including a
 frame from every chapter for scene selection. An 11-film collection makes around 50
-screens and takes a minute or two. Afterwards **Changed since last render** appears
-whenever you edit something the menus depend on; press **Update menus** to bring them up
-to date. A build also does this automatically.
+screens and takes a minute or two; themes with moving backgrounds take longer.
+Afterwards **Changed since last render** appears whenever you edit something the menus
+depend on, including replacing a picture or song you chose in the settings. Press
+**Render again** to bring them up to date; it always renders from scratch. A build also
+renders when something changed.
+
+- **Stop rendering** (in place of Render while it runs) stops within a moment, even
+  partway through recording a moving background. The previous menus are kept.
+- **Clear menus** deletes the rendered menus, for a completely fresh start. Chapter
+  frames are kept, because they only depend on the films.
 
 **Preview.** The picture in the middle is the rendered disc menu, and it behaves like the
 disc:

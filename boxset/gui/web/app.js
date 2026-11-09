@@ -353,7 +353,12 @@ function renderMenu() {
       <div class="stage-bar">
         <div class="left">${manifest ? `<select class="select" id="screenPick" aria-label="Screen">${screens}</select>` : ""}
           ${manifest ? (stale ? `<span class="stale">Changed since last render</span>` : `<span class="fresh">${manifest.menus.length} screens</span>`) : ""}</div>
-        <button class="btn ${manifest && !stale ? "" : "primary"}" data-do="render" ${rendering || !nFilms || hasProblems() ? "disabled" : ""}>${rendering ? "Rendering…" : manifest ? "Update menus" : "Render menus"}</button>
+        <div class="stage-actions">
+          ${manifest && !rendering ? `<button class="btn" data-do="clear-menus" title="Delete the rendered menus; the next render starts from nothing">Clear menus</button>` : ""}
+          ${rendering
+            ? `<button class="btn danger" data-do="stop-render">Stop rendering</button>`
+            : `<button class="btn ${manifest && !stale ? "" : "primary"}" data-do="render" ${!nFilms || hasProblems() ? "disabled" : ""}>${manifest ? "Render again" : "Render menus"}</button>`}
+        </div>
       </div>
       <div class="screen-wrap"><div class="screen" id="screen"></div></div>
       <div class="remote">
@@ -820,7 +825,13 @@ async function doThing(what, el) {
   switch (what) {
     case "pick-files": { const r = await act("pick_files"); if (r && r.__nodialog) addByPrompt("file"); break; }
     case "pick-folder": { const r = await act("pick_folder"); if (r && r.__nodialog) addByPrompt("folder"); break; }
-    case "render": await act("render_menus", false); break;
+    case "render": await act("render_menus", true); break;        // pressed on purpose: always render
+    case "stop-render": await act("cancel_render"); break;
+    case "clear-menus": {
+      const r = await act("clear_menus");
+      if (r) { manifest = null; sim.menu = null; sim.stack = []; menusDirty = true; render(); }
+      break;
+    }
     case "build": await startBuild(); break;
     case "install-theme": {
       const r = await act("install_theme");

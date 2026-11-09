@@ -132,6 +132,13 @@ def _menu_fingerprint(coll, media) -> str:
                          "extra": [{k: v for k, v in raw.items() if k != "file"}
                                    for raw in coll.extra.get("films", [])]},
                         sort_keys=True, default=str).encode())
+    # files picked in the theme's settings (logos, covers, music): a replaced file is a change
+    for key, value in sorted((coll.theme_options or {}).items()):
+        if isinstance(value, str) and value:
+            path = value if os.path.isabs(value) else os.path.join(coll.base_dir, value)
+            if os.path.isfile(path):
+                st = os.stat(path)
+                h.update(f"{key}:{st.st_size}:{int(st.st_mtime)}".encode())
     # changes to the theme's own files count too
     themes = core.list_themes(coll)
     tdir = themes.get(coll.theme)
@@ -175,7 +182,7 @@ def render_menus(coll, media, job: Job, force=False) -> dict:
         job.emit({"type": "progress", "stage": "menus", "label": msg.strip(),
                   "pct": 0.5 + min(0.49, done["n"] / (len(coll.films) * 2 + 4) * 0.5)})
 
-    ctx = core.Context(coll, films, theme_dir, coll.build, coll.theme_options, log=tlog)
+    ctx = core.Context(coll, films, theme_dir, coll.build, coll.theme_options, log=tlog, check=job.check)
     try:
         theme.build(ctx)
     finally:
