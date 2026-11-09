@@ -39,6 +39,7 @@ class Collection:
     build_dir: str = "build"
     save_space: bool = False
     speed: str = "quality"
+    auto_chapters: int = 5       # minutes between added chapters for films with none (0 = off)
     extra: dict = field(default_factory=dict)
 
     @property
@@ -108,6 +109,7 @@ def load(path: str) -> Collection:
         audio_kbps=int(raw.get("audio_kbps", 448)),
         save_space=bool(raw.get("save_space", False)),
         speed=raw.get("speed", "quality") if raw.get("speed") in ("quality", "fast", "gpu") else "quality",
+        auto_chapters=int(raw.get("auto_chapters", 5) or 0),
         audio_channels=int(raw.get("audio_channels", 6)),
         films=films,
         timeline_order=order,

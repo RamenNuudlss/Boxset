@@ -38,6 +38,7 @@ class Media:
     problems: list[str] = field(default_factory=list)   # warnings: handled, but worth knowing
     fatal: list[str] = field(default_factory=list)      # can't go on a Blu-ray as it is
     vcodec: str = ""
+    auto_chapters: bool = False                         # chapters added by Boxset, not in the file
     video_kbps: float | None = None                     # the source's video bitrate, when known
 
     @property

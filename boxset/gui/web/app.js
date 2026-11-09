@@ -242,9 +242,32 @@ function renderFilms() {
       <div class="film-table" id="filmTable">
         <div class="film-head"><span></span><span class="num">#</span><span>Title</span><span class="num">Year</span><span class="num">Length</span><span class="num">Chap.</span><span>Audio</span><span></span></div>
         ${films.map(filmRow).join("")}
-      </div></div>`;
+      </div>
+      ${chaptersControl(films)}</div>`;
   }
   el.innerHTML = left + `<aside class="disc-pane" id="discPane">${discPane()}</aside>`;
+}
+
+// films whose files have no chapters get them every few minutes (snapped to cuts at build time)
+function addedChapters(m) {
+  const min = +S.project.auto_chapters || 0;
+  if (!min || !m || m.error || m.chapters > 1 || (m.duration || 0) < 480) return 0;
+  let n = 1;
+  for (let t = min * 60; t < m.duration - 120; t += min * 60) n++;
+  return n;
+}
+function chapterCell(m) {
+  const n = addedChapters(m);
+  return n ? `<span class="chap-added" title="This file has no chapters. Boxset adds one about every ${S.project.auto_chapters} minutes, on a cut between shots.">${n}<i>added</i></span>` : m.chapters;
+}
+function chaptersControl(films) {
+  const none = films.filter((f) => { const m = S.meta[f.file]; return m && !m.error && m.chapters <= 1; }).length;
+  const min = +S.project.auto_chapters || 0;
+  const opts = [3, 4, 5, 6, 8, 10].map((v) => `<option value="${v}" ${v === min ? "selected" : ""}>Add one every ${v} minutes</option>`).join("");
+  return `<div class="films-foot">
+    <span>For films without chapters${none ? ` (${none} here)` : ""}:</span>
+    <select class="select small" data-auto-chapters aria-label="Chapters for films without any">${opts}<option value="0" ${min ? "" : "selected"}>Don't add any (no scene selection)</option></select>
+  </div>`;
 }
 
 function filmRow(f, i) {
@@ -260,7 +283,7 @@ function filmRow(f, i) {
     <input class="cell-input title-input" data-field="title" value="${esc(f.title)}" aria-label="Title of film ${i + 1}" spellcheck="false">
     <input class="cell-input year-input" data-field="year" value="${esc(f.year ?? "")}" inputmode="numeric" maxlength="4" placeholder="—" aria-label="Year">
     <span class="dim-cell">${m && !m.error ? fmtRun(m.duration) : ""}</span>
-    <span class="dim-cell">${m && !m.error ? m.chapters : ""}</span>
+    <span class="dim-cell">${m && !m.error ? chapterCell(m) : ""}</span>
     <span class="audio-cell">${m && !m.error ? esc(m.audio) : (m && m.error ? '<span class="problem err">Can\'t use</span>' : '<span class="faint">Reading…</span>')}</span>
     <button class="icon-btn" data-toggle aria-label="More about this film" aria-expanded="${open}">${status || ICON.chev}</button>
   </div>`;
@@ -932,6 +955,7 @@ document.addEventListener("change", (ev) => {
   if (t.dataset.bopt) { buildOpts[t.dataset.bopt] = t.checked; saveOpts(); renderBuild(); }
   if (t.matches("[data-save-space]")) return act("set", "save_space", t.checked);
   if (t.matches("[data-burner]")) return act("set_burner", t.value);
+  if (t.matches("[data-auto-chapters]")) return editAct("set", "auto_chapters", +t.value);
 });
 
 document.addEventListener("keydown", (ev) => {

@@ -8,6 +8,7 @@ The app turns these into its progress views; the command line prints them.
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -18,7 +19,7 @@ import threading
 import time
 from fractions import Fraction
 
-from . import budget, config, core, encoders, estimate, probe, thumbs
+from . import budget, chapters, config, core, encoders, estimate, probe, thumbs
 
 DISC_FPS = {
     Fraction(24000, 1001): (24000, 1001),
@@ -96,6 +97,11 @@ def load_media(coll, job: Job | None = None, refresh=False):
             problems.append((film.number, str(e)))
             continue
         cache[key] = m
+        minutes = getattr(coll, "auto_chapters", 0)
+        if minutes and chapters.needs_chapters(m):
+            m = dataclasses.replace(m, chapters=list(m.chapters))
+            chapters.add_to(m, minutes, chapters.Cache(os.path.join(coll.build, "chapters.json")),
+                            log=job.log if job else None, check=job.check if job else None, title=film.title)
         media[film.number] = m
         for p in getattr(m, "fatal", []):
             problems.append((film.number, p[0].upper() + p[1:]))

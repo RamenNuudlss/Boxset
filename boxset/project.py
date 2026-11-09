@@ -54,6 +54,7 @@ DEFAULT = {
     "audio_kbps": 448,
     "save_space": False,
     "speed": "quality",
+    "auto_chapters": 5,
     "timeline_order": None,
     "build_dir": "build",
     "films": [],
@@ -136,10 +137,12 @@ class Project:
     def set(self, key: str, value):
         if key == "disc_size" and value not in DISC_SIZES:
             raise ValueError(f"Unknown disc size {value}")
-        if key not in {"theme", "disc_label", "disc_size", "audio_kbps", "timeline_order", "build_dir", "save_space", "speed"}:
+        if key not in {"theme", "disc_label", "disc_size", "audio_kbps", "timeline_order", "build_dir", "save_space", "speed", "auto_chapters"}:
             raise ValueError(f"Can't set {key}")
         if key == "save_space":
             value = bool(value)
+        if key == "auto_chapters":
+            value = int(value or 0)
         if key == "speed" and value not in ("quality", "fast", "gpu"):
             raise ValueError(f"Unknown speed {value}")
         if key == "disc_label":

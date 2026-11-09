@@ -146,6 +146,15 @@ Click any title or year to edit it. Press Enter or click away to save.
 Drag the handle at the left of a row to set your own order. Once you've reordered by
 hand, Boxset stops sorting.
 
+**Chapters.** Chapters come from the file and give the disc its scene selection. Many
+downloads have none, so for those Boxset adds one every few minutes, like a retail disc,
+and moves each onto the nearest cut between shots (within 12 seconds) so a chapter never
+starts mid-shot. The **Chap.** column shows these as, for example, *18 added*. Choose how
+often under the film list (every 3 to 10 minutes, 5 by default), or **Don't add any**
+for no scene selection. Finding the cuts takes about a minute per film, the first time
+the menus are rendered or the disc is built; the result is remembered. Films shorter than
+8 minutes don't get chapters added.
+
 **Film details.** The arrow at the end of a row opens more:
 
 - **Setting or tagline**, shown on the film's page by some themes (the Tachometer theme
@@ -577,6 +586,7 @@ Paths can be absolute or relative to the project file.
   "audio_kbps": 448,
   "save_space": false,
   "speed": "quality",
+  "auto_chapters": 5,
   "theme": "tachometer",
   "theme_options": {
     "title_small": "THE COMPLETE",
@@ -601,6 +611,7 @@ Paths can be absolute or relative to the project file.
 | `audio_kbps` | Dolby Digital bitrate for 5.1 audio (default 448) |
 | `save_space` | `true` encodes films smaller, with some loss of fine detail (see [Save space](#save-space)). Default `false` |
 | `speed` | `quality` (default), `fast` or `gpu`; see [Build](#3-build) |
+| `auto_chapters` | Minutes between chapters added to films whose files have none; `0` adds none. Default `5` |
 | `theme` | The theme's folder name, as listed by `boxset-cli themes` |
 | `theme_options` | The theme's settings (see each theme). `timeline_order` lists film numbers in story order |
 | `build_dir` | Where build output goes, relative to the project file |

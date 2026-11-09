@@ -439,3 +439,11 @@ details summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
 .theme-item:hover .theme-remove, .theme-remove:focus-visible, .theme-remove.armed { opacity: 1; }
 .theme-remove:hover { background: #3A2729; border-color: #6A3A3D; color: #FFB3B5; }
 .theme-remove.armed { background: #5A2326; border-color: var(--err); color: #fff; }
+
+/* chapters added by Boxset */
+.chap-added { display: inline-flex; align-items: baseline; gap: 5px; }
+.chap-added i { font-style: normal; font-size: 11px; color: var(--laser-text); }
+.films-foot { display: flex; align-items: center; gap: 10px; padding: 10px 18px 14px; color: var(--text-2); font-size: 13px;
+  border-top: 1px solid var(--line); flex-wrap: wrap; }
+.films-foot .select { max-width: 320px; }
+.select.small { height: 30px; font-size: 13px; padding-top: 0; padding-bottom: 0; }
