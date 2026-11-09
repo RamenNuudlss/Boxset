@@ -22,6 +22,11 @@ import threading
 
 from . import probe
 
+# x264 quality settings (CRF: lower is better and bigger)
+CRF_STANDARD = 19
+CRF_SAVE_SPACE = 23
+CRF_TEST_BUILD = 24          # the quick test build (also a faster preset)
+
 SAMPLES = 12          # how many samples per film (more, shorter samples cover a film better)
 SAMPLE_SECONDS = 3    # length of each
 VERSION = 1           # bump when the encoder settings change, to measure again
@@ -35,7 +40,27 @@ _CODEC_FACTOR = {"hevc": 2.4, "av1": 2.8, "vp9": 2.2, "h264": 1.5,
                  "mpeg2video": 0.8, "vc1": 0.9, "mpeg4": 1.5}
 
 
-def guess(media) -> list[float]:
+def crf_for(save_space: bool) -> int:
+    return CRF_SAVE_SPACE if save_space else CRF_STANDARD
+
+
+def encoder_args(fps, max_bps, keys=(), fast=False, save_space=False) -> list[str]:
+    """bdmvkit's Blu-ray x264 settings, with Boxset's quality setting."""
+    from bdmvkit.encode import video_args
+    args = video_args(fps, max_bps, fast, keys)
+    i = args.index("-crf")
+    args[i + 1] = str(CRF_TEST_BUILD if fast else crf_for(save_space))
+    return args
+
+
+def rescale(rates: list[float], from_crf: int, to_crf: int) -> list[float]:
+    """Rough conversion between quality settings: x264 needs about half the bits
+    for every 6 steps of CRF."""
+    f = 2 ** (-(to_crf - from_crf) / 6)
+    return [r * f for r in rates]
+
+
+def guess(media, crf: int = CRF_STANDARD) -> list[float]:
     """A rough figure from the source file alone, before measuring."""
     src = getattr(media, "video_kbps", None)
     if not src:
@@ -46,7 +71,8 @@ def guess(media) -> list[float]:
         k *= 0.45
     elif pixels < 1280 * 720:           # small sources are scaled up, which adds some
         k *= 1.3
-    return [max(3000.0, min(UNLIMITED_KBPS, k))]
+    k = rescale([k], CRF_STANDARD, crf)[0]
+    return [max(1500.0, min(UNLIMITED_KBPS, k))]
 
 
 def video_kbps(rates: list[float], ceiling: float) -> float:
@@ -63,9 +89,9 @@ def limited_share(rates: list[float], ceiling: float) -> float:
     return sum(1 for r in rates if r > ceiling * 1.02) / len(rates)
 
 
-def measure(media, cancel: threading.Event | None = None) -> list[float] | None:
+def measure(media, cancel: threading.Event | None = None, crf: int = CRF_STANDARD) -> list[float] | None:
     """Encode short samples with the disc's real settings; return their bitrates."""
-    from bdmvkit.encode import fit_filter, video_args
+    from bdmvkit.encode import fit_filter
     from .pipeline import DISC_FPS
     fps = DISC_FPS.get(media.fps)
     if fps is None or media.duration <= 0:
@@ -82,7 +108,7 @@ def measure(media, cancel: threading.Event | None = None) -> list[float] | None:
             return None
         cmd = [ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-ss", f"{t:.2f}", "-i", media.path,
                "-t", f"{length:.2f}", "-map", "0:v:0", "-vf", fit_filter(fps), "-an", "-sn"]
-        cmd += video_args(fps, UNLIMITED_KBPS * 1000, False, ())
+        cmd += encoder_args(fps, UNLIMITED_KBPS * 1000, save_space=crf == CRF_SAVE_SPACE)
         cmd += ["-f", "h264", "pipe:1"]
         proc = subprocess.run(cmd, capture_output=True, creationflags=flags)
         if proc.returncode != 0 or not proc.stdout:
@@ -112,19 +138,20 @@ class Cache:
             self.data = {}
 
     @staticmethod
-    def key(path: str) -> str | None:
+    def key(path: str, crf: int = CRF_STANDARD) -> str | None:
         try:
             st = os.stat(path)
         except OSError:
             return None
-        return f"{os.path.normcase(os.path.abspath(path))}|{st.st_size}|{int(st.st_mtime)}|v{VERSION}"
+        base = f"{os.path.normcase(os.path.abspath(path))}|{st.st_size}|{int(st.st_mtime)}|v{VERSION}"
+        return base if crf == CRF_STANDARD else f"{base}|crf{crf}"
 
-    def get(self, path: str) -> list[float] | None:
-        k = self.key(path)
+    def get(self, path: str, crf: int = CRF_STANDARD) -> list[float] | None:
+        k = self.key(path, crf)
         return self.data.get(k) if k else None
 
-    def put(self, path: str, rates: list[float]):
-        k = self.key(path)
+    def put(self, path: str, rates: list[float], crf: int = CRF_STANDARD):
+        k = self.key(path, crf)
         if not k:
             return
         with self._lock:

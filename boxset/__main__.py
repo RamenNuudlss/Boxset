@@ -59,8 +59,11 @@ def cmd_check(args):
     if len(media) == len(coll.films):
         sizes = estimate.Cache(estimate.default_cache_path())
         ms = [media[f.number] for f in coll.films]
+        crf = estimate.crf_for(coll.save_space)
         say(budget.plan(coll.disc_size, [m.duration for m in ms], coll.audio_kbps,
-                        [sizes.get(m.path) or estimate.guess(m) for m in ms]).describe())
+                        [sizes.get(m.path, crf) or estimate.guess(m, crf) for m in ms]).describe())
+        if coll.save_space:
+            say("Save space is on: films are encoded smaller, with some loss of fine detail.")
     notes = [(f.number, p) for f in coll.films if f.number in media for p in media[f.number].problems]
     if notes:
         say("\nGood to know:")

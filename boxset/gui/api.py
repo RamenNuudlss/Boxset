@@ -55,7 +55,8 @@ class Api:
         self._lock = threading.RLock()
         self._pool = ThreadPoolExecutor(max_workers=3)
         self._measure_pool = ThreadPoolExecutor(max_workers=1)   # test encodes, one at a time
-        self._measuring: set[str] = set()
+        self._measuring: set[tuple[str, int]] = set()
+        self._media: dict = {}                                    # file path -> probe.Media
         self._stop_measuring = threading.Event()
         self.job: pipeline.Job | None = None
         self.status = self._idle_status()
@@ -219,6 +220,9 @@ class Api:
                 self._probing.add(p)
                 self._pool.submit(self._probe, p)
 
+    def _crf(self) -> int:
+        return estimate.crf_for(bool(self.project.data.get("save_space")))
+
     def _probe(self, path):
         media = None
         try:
@@ -230,37 +234,68 @@ class Api:
         except Exception as e:
             info = {"error": str(e).splitlines()[0][:200]}
         if media is not None and "error" not in info:
-            known = self.estimates.get(path)
-            info["need"] = known or estimate.guess(media)
-            info["measured"] = bool(known)
+            self._media[path] = media
+            # sample bitrates by quality setting, as far as they've been measured
+            info["rates"] = {str(c): r for c in (estimate.CRF_STANDARD, estimate.CRF_SAVE_SPACE)
+                             if (r := self.estimates.get(path, c))}
+            info["guess"] = estimate.guess(media)
         self.meta[path] = info
         self._probing.discard(path)
         self.push({"type": "meta", "file": path, "meta": info})
-        if media is not None and "error" not in info and not info["measured"] and path not in self._measuring:
-            self._measuring.add(path)
-            self._measure_pool.submit(self._measure, path, media)
+        self._measure_missing()
 
-    def _measure(self, path, media):
+    def _need(self, m: dict):
+        """(sample rates, state) for the current quality setting. state is True once
+        measured, False while waiting to be measured, None if measuring failed."""
+        crf = self._crf()
+        rates = (m.get("rates") or {})
+        if str(crf) in rates:
+            return rates[str(crf)], True
+        others = [(int(c), r) for c, r in rates.items()]
+        if others:
+            c, r = others[0]
+            est = estimate.rescale(r, c, crf)
+        else:
+            est = estimate.rescale(m.get("guess") or [], estimate.CRF_STANDARD, crf) or None
+        return est, (None if crf in m.get("failed", []) else False)
+
+    def _measure_missing(self):
+        crf = self._crf()
+        for f in self.project.films:
+            path, m = f["file"], self.meta.get(f["file"]) or {}
+            if path not in self._media or "error" in m:
+                continue
+            if str(crf) in (m.get("rates") or {}) or crf in m.get("failed", []):
+                continue
+            if (path, crf) not in self._measuring:
+                self._measuring.add((path, crf))
+                self._measure_pool.submit(self._measure, path, crf)
+
+    def _measure(self, path, crf):
         """Test-encode samples of the film to learn its real size on the disc."""
+        rates = None
         try:
-            if not any(f["file"] == path for f in self.project.films):
-                return                      # removed before its turn came
+            if not any(f["file"] == path for f in self.project.films) or crf != self._crf():
+                return                      # removed, or the setting changed, before its turn came
             while self.status.get("running"):
                 if self._stop_measuring.wait(5):   # don't compete with a build
                     return
-            rates = estimate.measure(media, self._stop_measuring)
+            rates = estimate.measure(self._media[path], self._stop_measuring, crf)
+            if self._stop_measuring.is_set():
+                return
         except Exception:
             rates = None
         finally:
-            self._measuring.discard(path)
+            self._measuring.discard((path, crf))
         info = self.meta.get(path)
         if info is None:
             return
+        info = dict(info)
         if rates:
-            self.estimates.put(path, rates)
-            info = dict(info, need=rates, measured=True)
+            self.estimates.put(path, rates, crf)
+            info["rates"] = dict(info.get("rates") or {}, **{str(crf): rates})
         else:
-            info = dict(info, measured=None)      # couldn't measure: keep the rough figure
+            info["failed"] = list(info.get("failed", [])) + [crf]   # keep the rough figure
         self.meta[path] = info
         self.push({"type": "meta", "file": path, "meta": info})
 
@@ -276,6 +311,8 @@ class Api:
         else:
             self.project.set(key, value)
         self._changed()
+        if key == "save_space":
+            self._measure_missing()
         return self.state()
 
     def set_option(self, key: str, value):
@@ -308,14 +345,16 @@ class Api:
         known = [(path, m) for path, m in films if m.get("duration")]
         if not known:
             return None
+        needs = [self._need(m) for _, m in known]
         p = budget.plan(self.project.data["disc_size"], [m["duration"] for _, m in known],
-                        int(self.project.data.get("audio_kbps", 448)), [m.get("need") for _, m in known])
+                        int(self.project.data.get("audio_kbps", 448)), [r for r, _ in needs])
         return {"video_kbps": p.video_kbps, "estimated_bytes": p.estimated_bytes, "capacity": p.capacity,
                 "warning": p.warning, "complete": len(known) == len(films), "total_seconds": p.total_seconds,
                 "reserve": budget.MENU_RESERVE, "overhead": budget.MUX_OVERHEAD,
                 "audio_kbps": p.audio_kbps, "limited": p.limited,
-                "films": {path: {"bytes": b, "measured": m.get("measured")} for (path, m), b in zip(known, p.film_bytes)},
-                "measuring": sum(1 for _, m in known if m.get("measured") is False)}
+                "films": {path: {"bytes": b, "measured": st} for (path, _), b, (_, st) in zip(known, p.film_bytes, needs)},
+                "measuring": sum(1 for _, st in needs if st is False),
+                "save_space": bool(self.project.data.get("save_space"))}
 
     def state(self):
         d = self.project.data

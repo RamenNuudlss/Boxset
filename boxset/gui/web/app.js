@@ -65,6 +65,9 @@ function fmtEta(s) {
   const m = Math.round(s / 60);
   return m < 60 ? `about ${m} min left` : `about ${Math.floor(m / 60)} hr ${m % 60} min left`;
 }
+const SAVE_SPACE_QUALITY = "Slightly below your files";
+const SAVE_SPACE_HELP = "Films take a third to a half less space. The cost: fine grain is smoothed over, and dark scenes, smoke and fast motion can show soft blocks or banding. Hardest to spot with downloads that were already heavily compressed; easiest with high-quality rips.";
+
 function quality(kbps) {
   const m = kbps / 1000;
   if (m >= 20) return ["Close to a retail disc", 1];
@@ -284,7 +287,9 @@ function discPane() {
   const used = segs.reduce((a, s) => a + s.bytes, 0) + (plan ? plan.reserve : 0);
   const over = used > cap;
   // when the films need less than the limit everywhere, the disc isn't what limits the picture
-  const [qWord, qFrac] = !plan ? ["", 0] : plan.limited < 0.1 ? ["Same as your files", 1] : quality(plan.video_kbps);
+  const save = !!S.project.save_space;
+  let [qWord, qFrac] = !plan ? ["", 0] : plan.limited < 0.1 ? (save ? [SAVE_SPACE_QUALITY, .86] : ["Same as your files", 1]) : quality(plan.video_kbps);
+  if (plan && save && plan.limited >= 0.1) qFrac = Math.min(qFrac, .86);
   const measuring = plan ? plan.measuring : 0;
   return `<div class="disc-figure">${discSvg({ segments: segs, capacity: cap, reserve: plan ? plan.reserve : 0, highlight: hot })}</div>
     <div class="capacity-line"><div class="capacity-big ${over ? "over" : ""}">${plan ? gb(used) : "0.0"}<small>of ${gb(cap)} GB</small></div>
@@ -292,6 +297,10 @@ function discPane() {
     ${measuring ? `<div class="capacity-hint"><span class="spin" aria-hidden="true"></span>Measuring ${measuring === 1 ? "1 film" : measuring + " films"} for an accurate size</div>` : ""}
     <div class="segmented" role="group" aria-label="Disc type">${Object.entries(sizes).map(([k, v]) =>
       `<button aria-pressed="${k === S.project.disc_size}" data-size="${k}"><strong>${k}</strong><span>${gb(v)} GB</span></button>`).join("")}</div>
+    <div class="save-space">
+      <label class="switch"><input type="checkbox" data-save-space ${save ? "checked" : ""}><span class="track"></span><span>Save space</span></label>
+      <p>${SAVE_SPACE_HELP}</p>
+    </div>
     ${plan ? `<dl class="facts">
       <dt>Video limit per film</dt><dd>${(plan.video_kbps / 1000).toFixed(1)} Mbps</dd>
       <dt>Picture quality</dt><dd>${qWord}</dd>
@@ -772,6 +781,7 @@ document.addEventListener("change", (ev) => {
   if (t.dataset.opt) return editAct("set_option", t.dataset.opt, t.type === "checkbox" ? t.checked : t.value);
   if (t.dataset.orderToggle) return editAct("set_option", t.dataset.orderToggle, t.checked ? S.project.films.map((_, k) => k + 1) : null);
   if (t.dataset.bopt) { buildOpts[t.dataset.bopt] = t.checked; saveOpts(); renderBuild(); }
+  if (t.matches("[data-save-space]")) return act("set", "save_space", t.checked);
 });
 
 document.addEventListener("keydown", (ev) => {

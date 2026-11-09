@@ -37,6 +37,7 @@ class Collection:
     chapters_per_page: int = 8
     scene_selection: bool = True
     build_dir: str = "build"
+    save_space: bool = False
     extra: dict = field(default_factory=dict)
 
     @property
@@ -104,6 +105,7 @@ def load(path: str) -> Collection:
         accent=opts.get("accent", "#FF6B1A"),
         disc_size=size,
         audio_kbps=int(raw.get("audio_kbps", 448)),
+        save_space=bool(raw.get("save_space", False)),
         audio_channels=int(raw.get("audio_channels", 6)),
         films=films,
         timeline_order=order,

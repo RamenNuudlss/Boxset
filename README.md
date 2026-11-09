@@ -180,6 +180,37 @@ minute or so per film and lands within about 10% of the finished size. Until a f
 measured, its size shows as "about" a rough figure worked out from the file, and a line
 under the disc says how many films are still being measured. Measurements are remembered, so each file is only measured once.
 
+#### Save space
+
+The **Save space** switch under the disc types encodes every film at a lighter quality
+setting (x264 CRF 23 instead of 19). Films take **a third to a half less space**, and
+the sizes on the disc update once the films have been measured at the new setting.
+
+What it costs, honestly:
+
+- **Film grain is smoothed over.** Grain is expensive to keep, so it's the first thing
+  to go, and the biggest saving comes from it. Grainy films look a little cleaner and
+  softer than your file.
+- **Hard scenes can break up.** Dark scenes, smoke, fog, water, confetti and fast camera
+  moves are where you may see soft blocks or banding (visible steps in smooth gradients
+  like a night sky).
+- **It shows most on good sources.** A high-quality rip has fine detail and grain to
+  lose. A download that was already heavily compressed has little left to lose, so the
+  difference is hard to see there.
+- **It can't be turned on for one film.** It applies to the whole disc. Switching it
+  after a build means encoding the films again.
+
+In testing on 1080p clips re-compressed to about 2 Mbps HEVC, like a typical download,
+Save space made the films 36% smaller on clean animation and 46% smaller with film grain
+added, and the median frame stayed within about 3 dB PSNR of the standard setting
+(43 dB against the source; a common rule of thumb is that above 40 dB differences are
+hard to spot in motion). That's a measurement on test clips, not a promise for every
+film: if you care about a particular film's grain or dark scenes, leave it off.
+
+When to use it: to fit more films on a smaller disc without the video limit dropping, or
+when your files are compressed downloads anyway. When not to: high-quality rips of films
+you care about, especially grainy or dark ones, when they fit without it.
+
 **The video limit.** So everything is guaranteed to fit, each disc type also sets a
 limit on how much video data a film can use:
 
@@ -489,6 +520,7 @@ Paths can be absolute or relative to the project file.
   "disc_label": "THE_FAST_SAGA",
   "disc_size": "BD-100",
   "audio_kbps": 448,
+  "save_space": false,
   "theme": "tachometer",
   "theme_options": {
     "title_small": "THE COMPLETE",
@@ -511,6 +543,7 @@ Paths can be absolute or relative to the project file.
 | `disc_label` | The disc's volume name: up to 32 letters, digits and underscores. Follows the name unless you set it |
 | `disc_size` | `BD-25`, `BD-50` or `BD-100` |
 | `audio_kbps` | Dolby Digital bitrate for 5.1 audio (default 448) |
+| `save_space` | `true` encodes films smaller, with some loss of fine detail (see [Save space](#save-space)). Default `false` |
 | `theme` | The theme's folder name, as listed by `boxset-cli themes` |
 | `theme_options` | The theme's settings (see each theme). `timeline_order` lists film numbers in story order |
 | `build_dir` | Where build output goes, relative to the project file |

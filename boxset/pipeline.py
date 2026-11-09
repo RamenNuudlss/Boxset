@@ -18,7 +18,7 @@ import threading
 import time
 from fractions import Fraction
 
-from . import budget, config, core, probe, thumbs
+from . import budget, config, core, estimate, probe, thumbs
 
 DISC_FPS = {
     Fraction(24000, 1001): (24000, 1001),
@@ -209,13 +209,14 @@ def _clip_settings(coll, media, plan, fast):
     st = os.stat(media.path)
     return {"source": media.path, "size": st.st_size, "mtime": int(st.st_mtime),
             "video_kbps": plan.video_kbps, "audio": list(audio_for(coll, media)[:2]), "fast": fast,
+            "crf": None if fast else estimate.crf_for(getattr(coll, "save_space", False)),
             "chapters": media.chapters, "v": 2}
 
 
 def encode_film(job: Job, coll, film, media, plan, out, fast, on_progress):
     """Encode one film to a Blu-ray clip with ffmpeg + x264 (bdmvkit's settings),
     reporting progress from ffmpeg and stoppable mid-way."""
-    from bdmvkit.encode import audio_args, fit_filter, video_args
+    from bdmvkit.encode import audio_args, fit_filter
     from bdmvkit.formats import AUDIO_PID, PMT_PID, VIDEO_PID
     fps = DISC_FPS.get(media.fps)
     if fps is None:
@@ -232,7 +233,8 @@ def encode_film(job: Job, coll, film, media, plan, out, fast, on_progress):
         cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
         amap = ["-map", "1:a:0"]
     cmd += ["-filter_complex", ";".join(graph), "-map", "[v]"] + amap
-    cmd += video_args(fps, plan.video_kbps * 1000, fast, [t for t in media.chapters if t > 0])
+    cmd += estimate.encoder_args(fps, plan.video_kbps * 1000, [t for t in media.chapters if t > 0],
+                                 fast, getattr(coll, "save_space", False))
     cmd += audio_args("ac3", channels, 0, bitrate)
     cmd += ["-streamid", f"0:{VIDEO_PID}", "-streamid", f"1:{AUDIO_PID}",
             "-t", f"{media.duration:.3f}", "-f", "mpegts", "-mpegts_m2ts_mode", "1",
@@ -311,6 +313,8 @@ def encode_all(coll, media, job: Job, plan, fast=False) -> dict[int, str]:
                     have = json.load(fh)
             except ValueError:
                 have = None
+        if have is not None and "crf" not in have:      # made before the quality setting existed
+            have["crf"] = None if have.get("fast") else estimate.CRF_STANDARD
         if have != want:
             todo.append((film, clip, meta, want))
     if not todo:
