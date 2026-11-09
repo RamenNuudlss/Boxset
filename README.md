@@ -292,11 +292,36 @@ which menu the player returns to afterwards. **Finish film** takes you there.
 
 **Options** (on the Build tab, before you start):
 
+- **Speed**, with a small gauge beside it. Three settings, each with its trade-off
+  written under it in the app:
+
+  | Speed | Encodes with | Compared with Best quality |
+  |---|---|---|
+  | **Best quality** (default) | Your processor, x264 "medium" | The baseline: slowest, best picture for the space |
+  | **Faster** | Your processor, x264 "veryfast" | About 2.5× faster. In testing, files came out 13–15% smaller with slightly less fine detail (1.2–1.5 dB PSNR lower) |
+  | **Graphics card** | NVIDIA NVENC, Intel Quick Sync or AMD AMF, whichever works on your PC | Usually several times faster, and the processor is left mostly free (it still reads and scales the video). Films get about 30% more space for a similar picture, because hardware encoders need more bits than x264 |
+
+  **About Graphics card, honestly:** x264 has a dedicated Blu-ray mode; graphics card
+  encoders don't, so Boxset sets the Blu-ray rules by hand (High profile at level 4.1,
+  four slices, a key frame at least every second, at most three B-frames, and the
+  disc's bitrate limits). Discs made this way should play, but they haven't been checked
+  against every player, so **burn a BD-RE and try it in yours first.** Also:
+  - Boxset tests your card when it starts, by encoding a few frames with the real
+    settings. If none works, the option is greyed out.
+  - The card encodes at a set average bitrate: what x264 measured the film needs,
+    plus 30%, within the disc's limit. That's why its sizes are known in advance.
+  - Films at 25 or 29.97 fps are encoded with **Faster** instead, because Blu-ray
+    stores them as 1080i, which only x264 can make here.
+  - If the card fails on a film (a driver problem, say), Boxset says so in the build
+    details and encodes that film with **Faster**, so the build still finishes.
+  - On AMD cards, chapter points land on the nearest key frame, up to half a second
+    from the exact time, because AMD's encoder can't place key frames on request.
+
 - **Also make a disc image (.iso) for burning.** On by default.
 - **Quick test build, low quality.** Encodes much faster at much lower quality. Use it to
   check menus and navigation on a real player before committing to a full build.
 
-**How long encoding takes.** It depends almost entirely on your processor. A modern
+**How long encoding takes.** With Best quality or Faster, it depends almost entirely on your processor. A modern
 desktop encodes 1080p faster than real time; an older laptop may be slower than real
 time. Boxset shows the speed (for example *1.8×*) and a time estimate once a film has
 started.
@@ -313,7 +338,7 @@ kept, and the next build picks up from the first unfinished film.
 | Changing the theme or any theme setting | No (menus only) |
 | Replacing a film's file, or editing the file | That film |
 | Adding or removing films, or changing the disc size | Usually all of them, because each film's share of the disc changes |
-| Switching between quick test and full quality | All of them |
+| Switching between quick test and full quality, changing **Speed**, or turning **Save space** on or off | All of them |
 
 When the build finishes, the Build tab offers **Show disc folder**, **Make disc image**
 (if you didn't make one) and **Burn to disc**.
@@ -521,6 +546,7 @@ Paths can be absolute or relative to the project file.
   "disc_size": "BD-100",
   "audio_kbps": 448,
   "save_space": false,
+  "speed": "quality",
   "theme": "tachometer",
   "theme_options": {
     "title_small": "THE COMPLETE",
@@ -544,6 +570,7 @@ Paths can be absolute or relative to the project file.
 | `disc_size` | `BD-25`, `BD-50` or `BD-100` |
 | `audio_kbps` | Dolby Digital bitrate for 5.1 audio (default 448) |
 | `save_space` | `true` encodes films smaller, with some loss of fine detail (see [Save space](#save-space)). Default `false` |
+| `speed` | `quality` (default), `fast` or `gpu`; see [Build](#3-build) |
 | `theme` | The theme's folder name, as listed by `boxset-cli themes` |
 | `theme_options` | The theme's settings (see each theme). `timeline_order` lists film numbers in story order |
 | `build_dir` | Where build output goes, relative to the project file |

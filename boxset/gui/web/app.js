@@ -541,6 +541,7 @@ function renderBuild() {
       <div class="burn-caption">${caption}</div>
     </div>
     <div class="steps-pane">${stepsPanel(segs)}</div>`;
+  swingGauge();
 }
 
 function stageLabel() {
@@ -564,6 +565,70 @@ function overallEta() {
   return left / cur.speed;
 }
 
+/* ===================================================================== speed */
+const SPEEDS = [
+  { id: "quality", label: "Best quality", angle: -62 },
+  { id: "fast", label: "Faster", angle: 4 },
+  { id: "gpu", label: "Graphics card", angle: 74 },
+];
+
+// A small rev gauge: the needle swings with the choice and buries itself in the
+// red zone (with a little shudder) when the graphics card is picked.
+function speedGauge(speed) {
+  const s = SPEEDS.find((x) => x.id === speed) || SPEEDS[0];
+  const cx = 30, cy = 30, r = 24;
+  const pt = (deg, rr) => { const a = (deg - 90) * Math.PI / 180; return [cx + rr * Math.cos(a), cy + rr * Math.sin(a)]; };
+  const arc = (a0, a1, rr) => { const [x0, y0] = pt(a0, rr), [x1, y1] = pt(a1, rr); return `M${x0.toFixed(2)},${y0.toFixed(2)}A${rr},${rr} 0 0,1 ${x1.toFixed(2)},${y1.toFixed(2)}`; };
+  let ticks = "";
+  for (let d = -90; d <= 90; d += 22.5) {
+    const [x0, y0] = pt(d, r - 1), [x1, y1] = pt(d, r - (d % 45 === 0 ? 7 : 4.5));
+    ticks += `<line x1="${x0.toFixed(2)}" y1="${y0.toFixed(2)}" x2="${x1.toFixed(2)}" y2="${y1.toFixed(2)}" class="${d >= 56 ? "g-tick red" : "g-tick"}"/>`;
+  }
+  return `<svg class="gauge ${s.id === "gpu" ? "maxed" : ""}" viewBox="0 0 60 36" aria-hidden="true">
+    <path d="${arc(-90, 56, r)}" class="g-arc"/>
+    <path d="${arc(56, 90, r)}" class="g-red"/>
+    ${ticks}
+    <g class="g-needle" data-to="${s.angle}" style="transform: rotate(${gaugeAngle ?? s.angle}deg)"><path d="M${cx - 1.4},${cy} L${cx},${cy - r + 5} L${cx + 1.4},${cy} Z"/></g>
+    <circle cx="${cx}" cy="${cy}" r="3.2" class="g-hub"/>
+  </svg>`;
+}
+
+let gaugeAngle = null;          // where the needle was drawn last, so a change swings it
+function swingGauge() {
+  const n = document.querySelector(".g-needle[data-to]");
+  if (!n) return;
+  const to = +n.dataset.to;
+  if (gaugeAngle !== to) {
+    void n.getBoundingClientRect();                     // start from the old angle…
+    requestAnimationFrame(() => { n.style.transform = `rotate(${to}deg)`; });  // …and swing
+  }
+  gaugeAngle = to;
+}
+
+function speedHelp(speed) {
+  const gpu = S.gpu;
+  if (speed === "fast") return "About 2½ times faster than Best quality. Files come out a little smaller, with slightly less fine detail.";
+  if (speed === "gpu") {
+    if (!S.gpu_checked) return "Checking this PC's graphics card…";
+    if (!gpu) return "No graphics card encoder works on this PC, so films are encoded with Faster instead.";
+    return `Uses your ${esc(gpu.name)}. Usually several times faster, and your PC is left mostly free. The costs: films take about 30% more space for the same picture, and graphics cards have no Blu-ray mode, so a few players may refuse the disc. Try a BD-RE in yours first.`;
+  }
+  return "Slowest, with the best picture for the space. Uses your processor at full load.";
+}
+
+function speedControl() {
+  const speed = S.project.speed || "quality";
+  const noGpu = S.gpu_checked && !S.gpu;
+  return `<div class="speed">
+    <div class="speed-row">
+      ${speedGauge(speed)}
+      <div class="segmented speed-seg" role="group" aria-label="Encoding speed">${SPEEDS.map((x) =>
+        `<button aria-pressed="${x.id === speed}" data-speed="${x.id}" ${x.id === "gpu" && noGpu && speed !== "gpu" ? 'disabled title="No graphics card encoder works on this PC"' : ""}>${x.label}</button>`).join("")}</div>
+    </div>
+    <p class="speed-help">${speedHelp(speed)}</p>
+  </div>`;
+}
+
 function stepsPanel(segs) {
   const j = S.job, films = S.project.films;
   const isBuild = j.kind === "build" || j.kind === "iso";
@@ -585,6 +650,7 @@ function stepsPanel(segs) {
   return `
     ${idle ? `<div class="pane-head" style="padding:0"><div><h2>Build</h2><div class="sub">Everything from here is automatic. Leave Boxset open and it will show when the disc is ready.</div></div></div>
       <div class="build-opts">
+        ${speedControl()}
         ${S.windows ? `<label class="switch"><input type="checkbox" data-bopt="iso" ${buildOpts.iso ? "checked" : ""}><span class="track"></span><span>Also make a disc image (.iso) for burning</span></label>` : ""}
         <label class="switch"><input type="checkbox" data-bopt="fast" ${buildOpts.fast ? "checked" : ""}><span class="track"></span><span>Quick test build, low quality</span></label>
         <button class="btn primary" data-do="build" ${!films.length || hasProblems() ? "disabled" : ""}>Build disc</button>
@@ -650,6 +716,9 @@ function onEvent(e) {
       break;
     case "films":
       call("state").then((st) => { S = st; menusDirty = true; render(); if (e.added) toast(`Added ${e.added} film${e.added > 1 ? "s" : ""}`); });
+      break;
+    case "gpu":
+      call("state").then((st) => { S = st; renderSoon(); });
       break;
     case "themes":
       call("state").then((st) => { S = st; render(); });
@@ -748,6 +817,7 @@ document.addEventListener("click", async (ev) => {
   }
   if (t.dataset.do) return doThing(t.dataset.do, t);
   if (t.dataset.size) return editAct("set", "disc_size", t.dataset.size);
+  if (t.dataset.speed) return act("set", "speed", t.dataset.speed);
   if (t.hasAttribute("data-toggle")) { const i = +t.closest(".film-row").dataset.i; openRow = openRow === i ? null : i; render(); return; }
   if (t.dataset.remove != null) { openRow = null; return editAct("remove_film", +t.dataset.remove); }
   if (t.dataset.theme) { if (t.dataset.theme !== S.project.theme) { await editAct("set", "theme", t.dataset.theme); } return; }

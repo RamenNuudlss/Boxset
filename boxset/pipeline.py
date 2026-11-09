@@ -18,7 +18,7 @@ import threading
 import time
 from fractions import Fraction
 
-from . import budget, config, core, estimate, probe, thumbs
+from . import budget, config, core, encoders, estimate, probe, thumbs
 
 DISC_FPS = {
     Fraction(24000, 1001): (24000, 1001),
@@ -205,17 +205,50 @@ def audio_for(coll, media):
     return channels, bitrate, lang
 
 
-def _clip_settings(coll, media, plan, fast):
+def _clip_settings(coll, media, plan, enc):
     st = os.stat(media.path)
     return {"source": media.path, "size": st.st_size, "mtime": int(st.st_mtime),
-            "video_kbps": plan.video_kbps, "audio": list(audio_for(coll, media)[:2]), "fast": fast,
-            "crf": None if fast else estimate.crf_for(getattr(coll, "save_space", False)),
-            "chapters": media.chapters, "v": 2}
+            "video_kbps": plan.video_kbps, "audio": list(audio_for(coll, media)[:2]),
+            "enc": enc, "chapters": media.chapters, "v": 2}
 
 
-def encode_film(job: Job, coll, film, media, plan, out, fast, on_progress):
-    """Encode one film to a Blu-ray clip with ffmpeg + x264 (bdmvkit's settings),
-    reporting progress from ffmpeg and stoppable mid-way."""
+def _legacy_settings(have: dict) -> dict:
+    """Settings saved by earlier versions, in today's form, so their films aren't
+    encoded again for nothing."""
+    if "enc" in have:
+        return have
+    fast = have.pop("fast", False)
+    crf = have.pop("crf", None)
+    have["enc"] = {"encoder": "x264", "preset": "ultrafast" if fast else "medium",
+                   "crf": encoders.CRF_TEST_BUILD if fast else (crf or encoders.CRF_STANDARD)}
+    return have
+
+
+def choose_encoder(coll, film, media, plan, fast, job: Job | None = None, gpu=None, sizes=None) -> dict:
+    """How one film will be encoded, from the build's speed and quality settings."""
+    if fast:
+        return {"encoder": "x264", "preset": "ultrafast", "crf": encoders.CRF_TEST_BUILD}
+    crf = encoders.crf_for(getattr(coll, "save_space", False))
+    speed = getattr(coll, "speed", "quality")
+    if encoders.uses_gpu(speed, gpu, DISC_FPS[media.fps]):
+        sizes = sizes or estimate.Cache(estimate.default_cache_path())
+        rates = sizes.get(media.path, crf)
+        if not rates:
+            if job:
+                job.log(f"Measuring {film.title} to set the graphics card's bitrate")
+            rates = estimate.measure(media, job._cancel if job else None, crf)
+            if rates:
+                sizes.put(media.path, rates, crf)
+            else:
+                rates = estimate.guess(media, crf)
+        kbps = encoders.gpu_target_kbps(rates, plan.video_kbps)
+        return {"encoder": gpu["encoder"], "kbps": int(kbps // 10 * 10)}
+    return {"encoder": "x264", "preset": encoders.x264_preset(speed), "crf": crf}
+
+
+def encode_film(job: Job, coll, film, media, plan, out, enc, on_progress):
+    """Encode one film to a Blu-ray clip with ffmpeg and the encoder `enc` names
+    (see choose_encoder), reporting progress and stoppable mid-way."""
     from bdmvkit.encode import audio_args, fit_filter
     from bdmvkit.formats import AUDIO_PID, PMT_PID, VIDEO_PID
     fps = DISC_FPS.get(media.fps)
@@ -233,8 +266,11 @@ def encode_film(job: Job, coll, film, media, plan, out, fast, on_progress):
         cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
         amap = ["-map", "1:a:0"]
     cmd += ["-filter_complex", ";".join(graph), "-map", "[v]"] + amap
-    cmd += estimate.encoder_args(fps, plan.video_kbps * 1000, [t for t in media.chapters if t > 0],
-                                 fast, getattr(coll, "save_space", False))
+    keys = [t for t in media.chapters if t > 0]
+    if enc["encoder"] == "x264":
+        cmd += encoders.x264_args(fps, plan.video_kbps * 1000, keys, enc["preset"], enc["crf"])
+    else:
+        cmd += encoders.gpu_args(enc["encoder"], fps, plan.video_kbps * 1000, enc["kbps"] * 1000, keys)
     cmd += audio_args("ac3", channels, 0, bitrate)
     cmd += ["-streamid", f"0:{VIDEO_PID}", "-streamid", f"1:{AUDIO_PID}",
             "-t", f"{media.duration:.3f}", "-f", "mpegts", "-mpegts_m2ts_mode", "1",
@@ -300,11 +336,23 @@ def encode_all(coll, media, job: Job, plan, fast=False) -> dict[int, str]:
     clips_dir = os.path.join(coll.build, "clips")
     os.makedirs(clips_dir, exist_ok=True)
     total = sum(media[f.number].duration for f in coll.films)
+    gpu = None
+    if not fast and getattr(coll, "speed", "quality") == "gpu":
+        gpu = encoders.detect_gpu()
+        if gpu:
+            job.log(f"Encoding with the graphics card: {gpu['name']}")
+        else:
+            job.log("No graphics card encoder works on this PC, so films are encoded with Faster instead.", "warn")
+        if gpu and any(DISC_FPS[media[f.number].fps] != encoders.FILM_FPS for f in coll.films):
+            job.log("Films at 25 or 29.97 fps are encoded with Faster: the graphics card can't make the "
+                    "1080i video Blu-ray needs at those rates.", "warn")
+    sizes = estimate.Cache(estimate.default_cache_path())
     todo, clips = [], {}
     for film in coll.films:
         clip = clip_path(coll, media[film.number])
         clips[film.number] = clip
-        want = _clip_settings(coll, media[film.number], plan, fast)
+        enc = choose_encoder(coll, film, media[film.number], plan, fast, job, gpu, sizes)
+        want = _clip_settings(coll, media[film.number], plan, enc)
         meta = clip + ".json"
         have = None
         if os.path.exists(clip) and os.path.exists(meta):
@@ -313,8 +361,8 @@ def encode_all(coll, media, job: Job, plan, fast=False) -> dict[int, str]:
                     have = json.load(fh)
             except ValueError:
                 have = None
-        if have is not None and "crf" not in have:      # made before the quality setting existed
-            have["crf"] = None if have.get("fast") else estimate.CRF_STANDARD
+        if have is not None:
+            have = _legacy_settings(have)
         if have != want:
             todo.append((film, clip, meta, want))
     if not todo:
@@ -332,7 +380,18 @@ def encode_all(coll, media, job: Job, plan, fast=False) -> dict[int, str]:
         def prog(pct, eta, speed, film=film, m=m, base=base):
             job.emit({"type": "progress", "stage": "encode", "film": film.number, "pct": pct,
                       "eta": eta, "speed": round(speed, 2), "overall": (base + pct * m.duration) / total})
-        encode_film(job, coll, film, m, plan, part, fast, prog)
+        try:
+            encode_film(job, coll, film, m, plan, part, want["enc"], prog)
+        except RuntimeError as e:
+            if want["enc"]["encoder"] == "x264":
+                raise
+            # the card failed (driver, memory, an unusual source): do this film on the processor
+            first = next((ln for ln in str(e).splitlines()[1:] if ln.strip()), str(e))[:160]
+            job.log(f"The graphics card couldn't encode {film.title} ({first}). Encoding it with Faster instead.",
+                    "warn")
+            want = dict(want, enc={"encoder": "x264", "preset": encoders.x264_preset("fast"),
+                                   "crf": encoders.crf_for(getattr(coll, "save_space", False))})
+            encode_film(job, coll, film, m, plan, part, want["enc"], prog)
         os.replace(part, clip)
         with open(meta, "w", encoding="utf-8") as fh:
             json.dump(want, fh)

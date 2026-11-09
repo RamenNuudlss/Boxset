@@ -393,3 +393,25 @@ details summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
 
 .save-space { display: grid; gap: 6px; margin-top: -4px; }
 .save-space p { margin: 0 0 0 44px; color: var(--text-3); font-size: 12.5px; line-height: 1.45; }
+
+/* speed: a small rev gauge beside the choice */
+.speed { display: grid; gap: 8px; padding-bottom: 4px; }
+.speed-row { display: flex; align-items: center; gap: 12px; }
+.speed-seg { flex: 1; }
+.speed-seg button { padding: 8px 6px; font-weight: 560; color: var(--text-2); }
+.speed-seg button[aria-pressed="true"] { color: var(--text); }
+.speed-seg button:disabled { opacity: .4; cursor: not-allowed; }
+.speed-help { margin: 0 0 0 64px; color: var(--text-3); font-size: 12.5px; line-height: 1.45; }
+.gauge { width: 52px; height: 32px; flex: none; overflow: visible; }
+.gauge .g-arc { fill: none; stroke: var(--line-strong); stroke-width: 2.4; stroke-linecap: round; }
+.gauge .g-red { fill: none; stroke: #6B2E31; stroke-width: 2.4; stroke-linecap: round; transition: stroke .3s, filter .3s; }
+.gauge .g-tick { stroke: var(--text-3); stroke-width: 1.1; stroke-linecap: round; }
+.gauge .g-tick.red { stroke: #A2474B; }
+.gauge .g-needle { transform-origin: 30px 30px; transform-box: view-box; fill: var(--laser-text);
+  transition: transform .75s cubic-bezier(.3, 1.6, .5, 1); }
+.gauge .g-hub { fill: var(--surface-3); stroke: var(--laser-text); stroke-width: 1.4; }
+.gauge.maxed .g-red { stroke: var(--err); filter: drop-shadow(0 0 3px rgba(239, 90, 95, .75)); }
+.gauge.maxed .g-tick.red { stroke: #FF8A8E; }
+.gauge.maxed .g-needle { fill: #FF8A8E; }
+.gauge.maxed .g-needle path { animation: redline .09s .75s linear 14 alternate; transform-origin: 30px 30px; transform-box: view-box; }
+@keyframes redline { from { transform: rotate(-1.6deg); } to { transform: rotate(1.6deg); } }

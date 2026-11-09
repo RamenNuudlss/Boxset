@@ -22,10 +22,7 @@ import threading
 
 from . import probe
 
-# x264 quality settings (CRF: lower is better and bigger)
-CRF_STANDARD = 19
-CRF_SAVE_SPACE = 23
-CRF_TEST_BUILD = 24          # the quick test build (also a faster preset)
+from .encoders import CRF_STANDARD, x264_args
 
 SAMPLES = 12          # how many samples per film (more, shorter samples cover a film better)
 SAMPLE_SECONDS = 3    # length of each
@@ -38,19 +35,6 @@ UNLIMITED_KBPS = 30_000
 # that measuring then takes back.
 _CODEC_FACTOR = {"hevc": 2.4, "av1": 2.8, "vp9": 2.2, "h264": 1.5,
                  "mpeg2video": 0.8, "vc1": 0.9, "mpeg4": 1.5}
-
-
-def crf_for(save_space: bool) -> int:
-    return CRF_SAVE_SPACE if save_space else CRF_STANDARD
-
-
-def encoder_args(fps, max_bps, keys=(), fast=False, save_space=False) -> list[str]:
-    """bdmvkit's Blu-ray x264 settings, with Boxset's quality setting."""
-    from bdmvkit.encode import video_args
-    args = video_args(fps, max_bps, fast, keys)
-    i = args.index("-crf")
-    args[i + 1] = str(CRF_TEST_BUILD if fast else crf_for(save_space))
-    return args
 
 
 def rescale(rates: list[float], from_crf: int, to_crf: int) -> list[float]:
@@ -89,7 +73,8 @@ def limited_share(rates: list[float], ceiling: float) -> float:
     return sum(1 for r in rates if r > ceiling * 1.02) / len(rates)
 
 
-def measure(media, cancel: threading.Event | None = None, crf: int = CRF_STANDARD) -> list[float] | None:
+def measure(media, cancel: threading.Event | None = None, crf: int = CRF_STANDARD,
+            preset: str = "medium") -> list[float] | None:
     """Encode short samples with the disc's real settings; return their bitrates."""
     from bdmvkit.encode import fit_filter
     from .pipeline import DISC_FPS
@@ -108,7 +93,7 @@ def measure(media, cancel: threading.Event | None = None, crf: int = CRF_STANDAR
             return None
         cmd = [ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-ss", f"{t:.2f}", "-i", media.path,
                "-t", f"{length:.2f}", "-map", "0:v:0", "-vf", fit_filter(fps), "-an", "-sn"]
-        cmd += encoder_args(fps, UNLIMITED_KBPS * 1000, save_space=crf == CRF_SAVE_SPACE)
+        cmd += x264_args(fps, UNLIMITED_KBPS * 1000, (), preset, crf)
         cmd += ["-f", "h264", "pipe:1"]
         proc = subprocess.run(cmd, capture_output=True, creationflags=flags)
         if proc.returncode != 0 or not proc.stdout:
@@ -138,20 +123,22 @@ class Cache:
             self.data = {}
 
     @staticmethod
-    def key(path: str, crf: int = CRF_STANDARD) -> str | None:
+    def key(path: str, crf: int = CRF_STANDARD, preset: str = "medium") -> str | None:
         try:
             st = os.stat(path)
         except OSError:
             return None
         base = f"{os.path.normcase(os.path.abspath(path))}|{st.st_size}|{int(st.st_mtime)}|v{VERSION}"
-        return base if crf == CRF_STANDARD else f"{base}|crf{crf}"
+        if crf != CRF_STANDARD:
+            base += f"|crf{crf}"
+        return base if preset == "medium" else f"{base}|{preset}"
 
-    def get(self, path: str, crf: int = CRF_STANDARD) -> list[float] | None:
-        k = self.key(path, crf)
+    def get(self, path: str, crf: int = CRF_STANDARD, preset: str = "medium") -> list[float] | None:
+        k = self.key(path, crf, preset)
         return self.data.get(k) if k else None
 
-    def put(self, path: str, rates: list[float], crf: int = CRF_STANDARD):
-        k = self.key(path, crf)
+    def put(self, path: str, rates: list[float], crf: int = CRF_STANDARD, preset: str = "medium"):
+        k = self.key(path, crf, preset)
         if not k:
             return
         with self._lock:

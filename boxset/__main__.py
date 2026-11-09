@@ -15,7 +15,7 @@ import argparse
 import sys
 import time
 
-from . import budget, config, core, estimate, pipeline, probe
+from . import budget, config, core, encoders, estimate, pipeline, probe
 from .config import ConfigError
 
 
@@ -59,7 +59,7 @@ def cmd_check(args):
     if len(media) == len(coll.films):
         sizes = estimate.Cache(estimate.default_cache_path())
         ms = [media[f.number] for f in coll.films]
-        crf = estimate.crf_for(coll.save_space)
+        crf = encoders.crf_for(coll.save_space)
         say(budget.plan(coll.disc_size, [m.duration for m in ms], coll.audio_kbps,
                         [sizes.get(m.path, crf) or estimate.guess(m, crf) for m in ms]).describe())
         if coll.save_space:
