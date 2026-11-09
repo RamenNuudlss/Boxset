@@ -81,6 +81,22 @@ jobs:
           sys.exit(0 if ok else 1)
           EOF
 
+      - name: Check that burner detection runs on Windows
+        # The runner has no disc drive: the script must still run cleanly and return a list.
+        shell: bash
+        run: |
+          python - <<'EOF'
+          import json, subprocess, sys
+          sys.path.insert(0, ".")
+          from boxset import burner
+          r = subprocess.run([burner._powershell(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
+                              "Bypass", "-Command", burner._SCRIPT], capture_output=True, text=True, timeout=120)
+          print("stdout:", r.stdout.strip()[:500]); print("stderr:", r.stderr.strip()[:500])
+          data = json.loads(r.stdout.strip())
+          assert isinstance(data, list), data
+          print("drives:", burner.list_drives())
+          EOF
+
       - name: Build the installer
         shell: pwsh
         run: |

@@ -415,3 +415,17 @@ details summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
 .gauge.maxed .g-needle { fill: #FF8A8E; }
 .gauge.maxed .g-needle path { animation: redline .09s .75s linear 14 alternate; transform-origin: 30px 30px; transform-box: view-box; }
 @keyframes redline { from { transform: rotate(-1.6deg); } to { transform: rotate(1.6deg); } }
+
+/* burner picker */
+.burner { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
+.burner-label { color: var(--text-3); font-size: 12.5px; }
+.burner-row { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.burner-row .btn { flex: none; }
+.burner-select { flex: 1; max-width: none; min-width: 0; }
+.burner-none { flex: 1; height: 32px; display: flex; align-items: center; color: var(--text-3); font-size: 13px; }
+.burner-msg { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+.burner-msg i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); transform: translateY(-1px); }
+.burner-msg.ok i { background: #5FCB8A; }
+.burner-msg.warn i { background: #E9B65C; }
+.burner-msg.stop i { background: var(--err); }
+.result .burner { margin-top: 12px; }

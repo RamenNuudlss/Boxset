@@ -292,8 +292,9 @@ which menu the player returns to afterwards. **Finish film** takes you there.
 
 **Options** (on the Build tab, before you start):
 
-- **Speed**, with a small gauge beside it. Three settings, each with its trade-off
-  written under it in the app:
+- **Speed**, with a small gauge beside it. Each setting's button shows how much of the
+  disc your films would take with it ("about" until they've been measured), and the
+  trade-off is written under the one you pick:
 
   | Speed | Encodes with | Compared with Best quality |
   |---|---|---|
@@ -309,7 +310,8 @@ which menu the player returns to afterwards. **Finish film** takes you there.
   - Boxset tests your card when it starts, by encoding a few frames with the real
     settings. If none works, the option is greyed out.
   - The card encodes at a set average bitrate: what x264 measured the film needs,
-    plus 30%, within the disc's limit. That's why its sizes are known in advance.
+    plus 30%, within the disc's limit. That's why its sizes are known in advance;
+    the finished films usually land within a few percent of the figure shown.
   - Films at 25 or 29.97 fps are encoded with **Faster** instead, because Blu-ray
     stores them as 1080i, which only x264 can make here.
   - If the card fails on a film (a driver problem, say), Boxset says so in the build
@@ -345,9 +347,24 @@ When the build finishes, the Build tab offers **Show disc folder**, **Make disc 
 
 ### Burning and testing
 
+**Choosing the burner.** The **Burner** drop-down on the Build tab (shown when *Also
+make a disc image* is on, and again when the disc is ready) lists the disc drives
+Windows can see. Drives that can't write Blu-ray are listed but can't be picked.
+Boxset remembers your choice, and the line under it says what's in the drive:
+
+| Shown | Meaning |
+|---|---|
+| 🟢 Blank BD-R in the drive, 25.0 GB. Ready to burn. | Good to go |
+| 🟡 No disc in the drive. | Put one in and press **Refresh** |
+| 🔴 The disc is too small, already written, or not a Blu-ray | **Burn to disc** stays off until you change the disc and press **Refresh** |
+
+A BD-RE with data on it needs erasing first: in File Explorer, select the drive and
+choose **Erase this disc**. Boxset finds drives with Windows' own burning service
+(IMAPI2), so any burner Windows can burn with works.
+
 **Burn to disc** opens the image in **Windows Disc Image Burner**, which comes with
-Windows. Choose your burner, tick *Verify disc after burning* if you like, and press
-**Burn**.
+Windows, with your chosen drive already selected. Tick *Verify disc after burning* if
+you like, and press **Burn**.
 
 The disc folder (`build\disc`, containing `BDMV`) also works with other tools:
 

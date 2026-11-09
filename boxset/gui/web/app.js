@@ -305,6 +305,7 @@ function discPane() {
       <dt>Video limit per film</dt><dd>${(plan.video_kbps / 1000).toFixed(1)} Mbps</dd>
       <dt>Picture quality</dt><dd>${qWord}</dd>
       <div class="quality-meter"><i style="width:${(qFrac * 100).toFixed(0)}%"></i></div>
+      <dt>Encoding speed</dt><dd>${plan.speed === "gpu" && S.gpu_checked && !S.gpu ? "Faster (no graphics card)" : (SPEEDS.find((x) => x.id === plan.speed) || SPEEDS[0]).label}</dd>
       <dt>Running time</dt><dd>${fmtLong(plan.total_seconds)}</dd>
       <dt>Audio</dt><dd>Dolby Digital, ${plan.audio_kbps} kbps</dd>
     </dl>` : ""}
@@ -605,15 +606,33 @@ function swingGauge() {
   gaugeAngle = to;
 }
 
+// what the whole disc would hold at a speed, as shown under its button
+function speedSize(id) {
+  const z = (S.speed_sizes || {})[id];
+  if (!z) return id === "gpu" ? (S.gpu_checked ? "Not available" : "Checking…") : "&nbsp;";
+  return `${z.exact ? "" : "about "}${gb(z.bytes)} GB`;
+}
+
+// the difference a speed makes, in GB, against Best quality
+function speedDelta(id) {
+  const z = S.speed_sizes || {};
+  if (!z[id] || !z.quality || id === "quality") return "";
+  const d = z[id].bytes - z.quality.bytes;
+  if (Math.abs(d) < 0.05e9) return "";
+  return ` ${d > 0 ? `${gb(d)} GB more` : `${gb(-d)} GB less`} than Best quality`;
+}
+
 function speedHelp(speed) {
   const gpu = S.gpu;
-  if (speed === "fast") return "About 2½ times faster than Best quality. Files come out a little smaller, with slightly less fine detail.";
+  const z = (S.speed_sizes || {})[speed];
+  const total = z && S.project.films.length ? ` These films will take ${z.exact ? "" : "about "}${gb(z.bytes)} GB of the ${S.project.disc_size.replace("-", "\u2011")}${speedDelta(speed)}.` : "";
+  if (speed === "fast") return "About 2½ times faster than Best quality. Files come out a little smaller, with slightly less fine detail." + total;
   if (speed === "gpu") {
     if (!S.gpu_checked) return "Checking this PC's graphics card…";
     if (!gpu) return "No graphics card encoder works on this PC, so films are encoded with Faster instead.";
-    return `Uses your ${esc(gpu.name)}. Usually several times faster, and your PC is left mostly free. The costs: films take about 30% more space for the same picture, and graphics cards have no Blu-ray mode, so a few players may refuse the disc. Try a BD-RE in yours first.`;
+    return `Uses your ${esc(gpu.name)}. Usually several times faster, and your PC is left mostly free. The costs: films take about 30% more space for the same picture, and graphics cards have no Blu-ray mode, so a few players may refuse the disc. Try a BD-RE in yours first.${total}`;
   }
-  return "Slowest, with the best picture for the space. Uses your processor at full load.";
+  return "Slowest, with the best picture for the space. Uses your processor at full load." + total;
 }
 
 function speedControl() {
@@ -623,9 +642,26 @@ function speedControl() {
     <div class="speed-row">
       ${speedGauge(speed)}
       <div class="segmented speed-seg" role="group" aria-label="Encoding speed">${SPEEDS.map((x) =>
-        `<button aria-pressed="${x.id === speed}" data-speed="${x.id}" ${x.id === "gpu" && noGpu && speed !== "gpu" ? 'disabled title="No graphics card encoder works on this PC"' : ""}>${x.label}</button>`).join("")}</div>
+        `<button aria-pressed="${x.id === speed}" data-speed="${x.id}" ${x.id === "gpu" && noGpu && speed !== "gpu" ? 'disabled title="No graphics card encoder works on this PC"' : ""}><strong>${x.label}</strong><span>${speedSize(x.id)}</span></button>`).join("")}</div>
     </div>
     <p class="speed-help">${speedHelp(speed)}</p>
+  </div>`;
+}
+
+/* ===================================================================== burner */
+function burnerPicker() {
+  if (!S.windows) return "";
+  const b = S.burners || {};
+  const drives = b.drives || [];
+  const looking = b.drives == null || b.checking;
+  const pick = drives.length
+    ? `<select class="select burner-select" data-burner aria-label="Burner" ${looking ? "disabled" : ""}>${drives.map((d) =>
+        `<option value="${esc(d.id)}" ${d.id === b.chosen ? "selected" : ""} ${d.bd ? "" : "disabled"}>${esc(d.name)}${d.bd ? "" : " (can't write Blu-ray)"}</option>`).join("")}</select>`
+    : `<div class="burner-none">${looking ? "Looking for burners…" : "No disc burners found"}</div>`;
+  return `<div class="burner">
+    <div class="burner-label">Burner</div>
+    <div class="burner-row">${pick}<button class="btn small" data-do="refresh-burners" ${looking ? "disabled" : ""}>${looking ? "Looking…" : "Refresh"}</button></div>
+    ${b.message && !looking ? `<div class="burner-msg ${esc(b.level || "")}"><i></i>${esc(b.message)}</div>` : ""}
   </div>`;
 }
 
@@ -653,13 +689,15 @@ function stepsPanel(segs) {
         ${speedControl()}
         ${S.windows ? `<label class="switch"><input type="checkbox" data-bopt="iso" ${buildOpts.iso ? "checked" : ""}><span class="track"></span><span>Also make a disc image (.iso) for burning</span></label>` : ""}
         <label class="switch"><input type="checkbox" data-bopt="fast" ${buildOpts.fast ? "checked" : ""}><span class="track"></span><span>Quick test build, low quality</span></label>
+        ${buildOpts.iso ? burnerPicker() : ""}
         <button class="btn primary" data-do="build" ${!films.length || hasProblems() ? "disabled" : ""}>Build disc</button>
       </div>` : ""}
     ${res ? `<div class="result"><h3>Your disc is ready</h3>
       <div class="faint">${esc(res.folder || "")}</div>
       <div class="row"><button class="btn" data-do="open-disc">Show disc folder</button>
       ${S.windows && !res.iso ? `<button class="btn" data-do="make-iso">Make disc image</button>` : ""}
-      ${S.windows && res.iso ? `<button class="btn primary" data-do="burn">Burn to disc</button>` : ""}</div>
+      ${S.windows && res.iso ? `<button class="btn primary" data-do="burn" ${(S.burners || {}).level === "stop" ? "disabled" : ""}>Burn to disc</button>` : ""}</div>
+      ${S.windows && res.iso ? burnerPicker() : ""}
       ${S.windows ? "" : `<div class="faint">Burn the disc folder with your usual Blu-ray burning app.</div>`}
       <div class="faint">Try a rewritable BD-RE in your player before burning a write-once disc.</div></div>` : ""}
     ${j.error && isBuild && j.error !== "Cancelled" ? `<div class="note warn">${esc(j.error)}</div>` : ""}
@@ -718,6 +756,7 @@ function onEvent(e) {
       call("state").then((st) => { S = st; menusDirty = true; render(); if (e.added) toast(`Added ${e.added} film${e.added > 1 ? "s" : ""}`); });
       break;
     case "gpu":
+    case "burners":
       call("state").then((st) => { S = st; renderSoon(); });
       break;
     case "themes":
@@ -785,6 +824,7 @@ async function doThing(what, el) {
     case "open-disc": act("open_folder", "disc"); break;
     case "make-iso": await act("make_iso"); break;
     case "burn": act("burn"); break;
+    case "refresh-burners": act("refresh_burners"); break;
     case "finish-film": { const c = sim.card; sim.card = null; simGo(c.after, c.afterBtn); break; }
   }
 }
@@ -852,6 +892,7 @@ document.addEventListener("change", (ev) => {
   if (t.dataset.orderToggle) return editAct("set_option", t.dataset.orderToggle, t.checked ? S.project.films.map((_, k) => k + 1) : null);
   if (t.dataset.bopt) { buildOpts[t.dataset.bopt] = t.checked; saveOpts(); renderBuild(); }
   if (t.matches("[data-save-space]")) return act("set", "save_space", t.checked);
+  if (t.matches("[data-burner]")) return act("set_burner", t.value);
 });
 
 document.addEventListener("keydown", (ev) => {

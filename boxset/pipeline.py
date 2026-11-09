@@ -115,6 +115,7 @@ def probe_one(path: str) -> dict:
 def describe(m) -> dict:
     a = m.audio[0] if m.audio else None
     return {"duration": m.duration, "chapters": len(m.chapters), "fps": m.fps_label,
+            "channels": a.channels if a else 2,
             "width": m.width, "height": m.height, "size": os.path.getsize(m.path),
             "audio": f"{a.codec.upper()} {a.channels}ch" if a else "No audio",
             "problems": m.problems, **({"error": m.fatal[0][0].upper() + m.fatal[0][1:]} if m.fatal else {})}

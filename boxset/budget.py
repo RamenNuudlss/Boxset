@@ -44,7 +44,8 @@ def film_size(duration: float, video: float, audio_kbps: int) -> int:
 
 
 def plan(disc_size: str, durations: list[float], audio_kbps: int,
-         needs: list[list[float] | None] | None = None) -> Plan:
+         needs: list[list[float] | None] | None = None,
+         film_audio: list[int] | None = None) -> Plan:
     """`needs`: per film, the sample bitrates from estimate.guess/measure. Films
     without one are counted at the full limit, the most they could take."""
     cap = DISC_SIZES[disc_size]
@@ -58,10 +59,11 @@ def plan(disc_size: str, durations: list[float], audio_kbps: int,
         warning = (f"only {video / 1000:.1f} Mbps per film; picture quality will suffer"
                    + (f" (a {bigger[0]} would help)" if bigger else ""))
     needs = needs or [None] * len(durations)
+    film_audio = film_audio or [audio_kbps] * len(durations)
     sizes, held = [], 0.0
-    for d, rates in zip(durations, needs):
+    for d, rates, a in zip(durations, needs, film_audio):
         v = video_kbps(rates, video) if rates else video
-        sizes.append(film_size(d, v, audio_kbps))
+        sizes.append(film_size(d, v, a))
         held += d * (limited_share(rates, video) if rates else 1.0)
     est = sum(sizes) + MENU_RESERVE
     return Plan(disc_size, total, video, audio_kbps, cap, est, warning, sizes,

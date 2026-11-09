@@ -16,7 +16,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from .. import budget, core, encoders, estimate, pipeline, probe, project as projmod
+from .. import budget, burner, core, encoders, estimate, pipeline, probe, project as projmod
 from ..config import DISC_SIZES
 from ..project import Project
 
@@ -65,6 +65,9 @@ class Api:
         self.estimates = estimate.Cache(estimate.default_cache_path())
         self.gpu, self.gpu_checked = None, False
         threading.Thread(target=self._detect_gpu, daemon=True).start()
+        self.burners: list[dict] | None = None      # None until the first look
+        self._burner_lock = threading.Lock()
+        threading.Thread(target=self._detect_burners, daemon=True).start()
 
     # ------------------------------------------------------------------ events
     def subscribe(self) -> queue.Queue:
@@ -227,10 +230,10 @@ class Api:
     # from the x264 "medium" measurement (see encoders.gpu_target_kbps).
     PRESET_FACTOR = {"medium": 1.0, "veryfast": 0.86}   # veryfast came out ~14% smaller in testing
 
-    def _profile(self, m: dict) -> tuple[int, str, bool]:
+    def _profile(self, m: dict, speed: str | None = None) -> tuple[int, str, bool]:
         """(crf, preset to measure with, sized as the graphics card) for a film."""
         crf = encoders.crf_for(bool(self.project.data.get("save_space")))
-        speed = self.project.data.get("speed", "quality")
+        speed = speed or self.project.data.get("speed", "quality")
         progressive = m.get("fps") in ("23.976", "24")
         if speed == "gpu" and self.gpu and progressive:
             return crf, "medium", True
@@ -257,10 +260,10 @@ class Api:
         self.push({"type": "meta", "file": path, "meta": info})
         self._measure_missing()
 
-    def _need(self, m: dict):
-        """(sample rates, state) for the current settings. state is True once
-        measured, False while waiting to be measured, None if measuring failed."""
-        crf, preset, gpu = self._profile(m)
+    def _need(self, m: dict, speed: str | None = None):
+        """(sample rates, state) for the current settings (or another speed). state is
+        True once measured, False while not measured yet, None if measuring failed."""
+        crf, preset, gpu = self._profile(m, speed)
         key = f"{crf}/{preset}"
         rates = m.get("rates") or {}
         if key in rates:
@@ -372,22 +375,37 @@ class Api:
         return st
 
     # ------------------------------------------------------------------ state
-    def _plan(self):
+    def _plan(self, speed: str | None = None):
         films = [(f["file"], self.meta.get(f["file"]) or {}) for f in self.project.films]
         known = [(path, m) for path, m in films if m.get("duration")]
         if not known:
             return None
-        needs = [self._need(m) for _, m in known]
-        p = budget.plan(self.project.data["disc_size"], [m["duration"] for _, m in known],
-                        int(self.project.data.get("audio_kbps", 448)), [r for r, _ in needs])
+        needs = [self._need(m, speed) for _, m in known]
+        audio = int(self.project.data.get("audio_kbps", 448))
+        p = budget.plan(self.project.data["disc_size"], [m["duration"] for _, m in known], audio,
+                        [r for r, _ in needs],
+                        # stereo films get 192 kbps audio on the disc, 5.1 films the project's rate
+                        [audio if (m.get("channels") or 6) >= 6 else 192 for _, m in known])
         return {"video_kbps": p.video_kbps, "estimated_bytes": p.estimated_bytes, "capacity": p.capacity,
                 "warning": p.warning, "complete": len(known) == len(films), "total_seconds": p.total_seconds,
                 "reserve": budget.MENU_RESERVE, "overhead": budget.MUX_OVERHEAD,
                 "audio_kbps": p.audio_kbps, "limited": p.limited,
                 "films": {path: {"bytes": b, "measured": st} for (path, _), b, (_, st) in zip(known, p.film_bytes, needs)},
                 "measuring": sum(1 for _, st in needs if st is False),
+                "exact": all(st for _, st in needs),
                 "save_space": bool(self.project.data.get("save_space")),
-                "speed": self.project.data.get("speed", "quality")}
+                "speed": speed or self.project.data.get("speed", "quality")}
+
+    def _speed_sizes(self):
+        """What the disc would hold at each speed, for the Speed control."""
+        out = {}
+        for sp in encoders.SPEEDS:
+            if sp == "gpu" and not self.gpu:
+                continue
+            p = self._plan(sp)
+            if p:
+                out[sp] = {"bytes": p["estimated_bytes"], "exact": p["exact"]}
+        return out
 
     def state(self):
         d = self.project.data
@@ -414,6 +432,8 @@ class Api:
             "recent": self.recent(),
             "gpu": self.gpu,
             "gpu_checked": self.gpu_checked,
+            "speed_sizes": self._speed_sizes(),
+            "burners": self._burner_state(),
         }
 
     @staticmethod
@@ -572,20 +592,61 @@ class Api:
             subprocess.Popen(["xdg-open", target])
         return {"ok": True}
 
-    def burn(self):
-        """Hand the disc image to Windows' own disc burner."""
+    # ------------------------------------------------------------------ burners
+    def _detect_burners(self):
+        if not self._burner_lock.acquire(blocking=False):
+            return                                   # a look is already under way
+        try:
+            self.push({"type": "burners", "checking": True})
+            self.burners = burner.list_drives()
+        finally:
+            self._burner_lock.release()
+        self.push({"type": "burners"})
+
+    def refresh_burners(self):
+        threading.Thread(target=self._detect_burners, daemon=True).start()
+        return self.state()
+
+    def set_burner(self, drive_id: str):
+        self.settings["burner"] = drive_id
+        self._save_settings()
+        return self.state()
+
+    def _chosen_burner(self):
+        drives = self.burners or []
+        want = self.settings.get("burner")
+        return (next((d for d in drives if d.get("id") == want and d.get("bd")), None)
+                or next((d for d in drives if d.get("bd")), None))
+
+    def _iso_path(self):
         res = (self.status.get("result") or {})
         iso_path = res.get("iso")
-        if not iso_path:
+        if not iso_path and self.project.path:
             label = re.sub(r"[^A-Za-z0-9_]", "", self.project.data.get("disc_label", "")) or "COLLECTION"
             cand = os.path.join(self.project.build_dir, f"{label}.iso")
             iso_path = cand if os.path.exists(cand) else None
+        return iso_path
+
+    def _burner_state(self):
+        chosen = self._chosen_burner()
+        iso_path = self._iso_path()
+        need = os.path.getsize(iso_path) if iso_path and os.path.exists(iso_path) else None
+        if need is None:
+            p = self._plan()
+            need = p["estimated_bytes"] if p else None
+        level, message = burner.check_disc(chosen, need) if self.burners is not None else ("wait", "Looking for burners…")
+        return {"drives": self.burners, "chosen": chosen["id"] if chosen else None,
+                "checking": self._burner_lock.locked(), "level": level, "message": message}
+
+    def burn(self):
+        """Hand the disc image to Windows' own disc burner, with the chosen drive."""
+        iso_path = self._iso_path()
         if not iso_path:
             raise RuntimeError("Make the disc image first.")
         if sys.platform != "win32":
             raise RuntimeError("Burning uses Windows' built-in disc burner.")
-        burner = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "isoburn.exe")
-        subprocess.Popen([burner, iso_path])
+        chosen = self._chosen_burner()
+        burner.burn(iso_path, chosen.get("drive") if chosen else None)
         return {"ok": True}
 
     # ------------------------------------------------------------------ dialogs
