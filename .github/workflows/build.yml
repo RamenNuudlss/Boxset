@@ -56,6 +56,31 @@ jobs:
         run: |
           dist\Boxset\boxset-cli.exe themes packaging\smoke.boxset
 
+      - name: Check the graphics card settings against the bundled FFmpeg
+        # The runner has no graphics card, so each encoder must get past option
+        # checking and stop only at "no device"; a rejected option fails the build.
+        shell: bash
+        run: |
+          python - <<'EOF'
+          import subprocess, sys
+          sys.path.insert(0, ".")
+          from boxset import encoders
+          ffmpeg = r"dist/Boxset/bin/ffmpeg.exe"
+          bad = ("Unrecognized option", "Option not found", "Error setting option",
+                 "Invalid argument for option", "Unable to parse option", "Undefined constant")
+          ok = True
+          for enc, _ in encoders.GPU_ENCODERS:
+              cmd = [ffmpeg, "-hide_banner", "-v", "error", "-f", "lavfi",
+                     "-i", "color=black:s=1920x1080:r=24000/1001", "-frames:v", "5"]
+              cmd += encoders.gpu_args(enc, (24000, 1001), 30e6, 8e6, [1.0]) + ["-f", "null", "-"]
+              err = subprocess.run(cmd, capture_output=True, text=True).stderr
+              hit = [ln for ln in err.splitlines() if any(b in ln for b in bad)]
+              print(enc, "REJECTED: " + " | ".join(hit) if hit else "options accepted",
+                    "|", (err.strip().splitlines() or ["(encoded)"])[0][:160])
+              ok &= not hit
+          sys.exit(0 if ok else 1)
+          EOF
+
       - name: Build the installer
         shell: pwsh
         run: |
