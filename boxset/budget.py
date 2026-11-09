@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import DISC_SIZES
+from .estimate import limited_share, video_kbps
 
 MENU_RESERVE = 1_500_000_000      # bytes held back for menus, thumbnails and filesystem
 MUX_OVERHEAD = 0.05               # M2TS packet and header overhead (~4-5%)
@@ -18,24 +19,34 @@ class Plan:
     video_kbps: int
     audio_kbps: int
     capacity: int
-    estimated_bytes: int
+    estimated_bytes: int          # what the disc will really hold, from each film's needs
     warning: str | None
+    film_bytes: list[int]         # per film, in the order given
+    limited: float = 0.0          # share of the running time held back by the limit (0 to 1)
 
     def describe(self) -> str:
         h, m = divmod(round(self.total_seconds / 60), 60)
         lines = [
             f"Disc:        {self.disc_size} ({self.capacity / 1e9:.1f} GB)",
             f"Running time {h} hr {m} min of film",
-            f"Video:       {self.video_kbps / 1000:.1f} Mbps per film",
+            f"Video:       up to {self.video_kbps / 1000:.1f} Mbps per film",
             f"Audio:       {self.audio_kbps} kbps Dolby Digital",
-            f"Estimate:    {self.estimated_bytes / 1e9:.1f} GB used",
+            f"Estimate:    about {self.estimated_bytes / 1e9:.1f} GB used, "
+            f"{max(0, self.capacity - self.estimated_bytes) / 1e9:.1f} GB free",
         ]
         if self.warning:
             lines.append(f"Warning:     {self.warning}")
         return "\n".join(lines)
 
 
-def plan(disc_size: str, durations: list[float], audio_kbps: int) -> Plan:
+def film_size(duration: float, video: float, audio_kbps: int) -> int:
+    return int((video + audio_kbps) * 1000 * duration / 8 * (1 + MUX_OVERHEAD))
+
+
+def plan(disc_size: str, durations: list[float], audio_kbps: int,
+         needs: list[list[float] | None] | None = None) -> Plan:
+    """`needs`: per film, the sample bitrates from estimate.guess/measure. Films
+    without one are counted at the full limit, the most they could take."""
     cap = DISC_SIZES[disc_size]
     total = sum(durations)
     usable_bits = (cap - MENU_RESERVE) * 8 / (1 + MUX_OVERHEAD)
@@ -46,5 +57,12 @@ def plan(disc_size: str, durations: list[float], audio_kbps: int) -> Plan:
         bigger = [s for s in DISC_SIZES if DISC_SIZES[s] > cap]
         warning = (f"only {video / 1000:.1f} Mbps per film; picture quality will suffer"
                    + (f" (a {bigger[0]} would help)" if bigger else ""))
-    est = int((video + audio_kbps) * 1000 * total / 8 * (1 + MUX_OVERHEAD) + MENU_RESERVE)
-    return Plan(disc_size, total, video, audio_kbps, cap, est, warning)
+    needs = needs or [None] * len(durations)
+    sizes, held = [], 0.0
+    for d, rates in zip(durations, needs):
+        v = video_kbps(rates, video) if rates else video
+        sizes.append(film_size(d, v, audio_kbps))
+        held += d * (limited_share(rates, video) if rates else 1.0)
+    est = sum(sizes) + MENU_RESERVE
+    return Plan(disc_size, total, video, audio_kbps, cap, est, warning, sizes,
+                held / total if total else 0.0)

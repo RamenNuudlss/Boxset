@@ -172,9 +172,11 @@ function filmSegments() {
   return films.map((f, i) => {
     const m = S.meta[f.file] || {};
     const dur = m.duration || 0;
+    const est = plan && plan.films ? plan.films[f.file] : null;
     let bytes = 0;
-    if (plan && dur) bytes = ((plan.video_kbps + plan.audio_kbps) * 1000 * dur / 8) * (1 + plan.overhead);
-    return { index: i, bytes, title: f.title, color: filmColor(i, films.length) };
+    if (est) bytes = est.bytes;
+    else if (plan && dur) bytes = ((plan.video_kbps + plan.audio_kbps) * 1000 * dur / 8) * (1 + plan.overhead);
+    return { index: i, bytes, title: f.title, color: filmColor(i, films.length), exact: !!(est && est.measured) };
   });
 }
 
@@ -281,14 +283,17 @@ function discPane() {
   const cap = sizes[S.project.disc_size];
   const used = segs.reduce((a, s) => a + s.bytes, 0) + (plan ? plan.reserve : 0);
   const over = used > cap;
-  const [qWord, qFrac] = plan ? quality(plan.video_kbps) : ["", 0];
+  // when the films need less than the limit everywhere, the disc isn't what limits the picture
+  const [qWord, qFrac] = !plan ? ["", 0] : plan.limited < 0.1 ? ["Same as your files", 1] : quality(plan.video_kbps);
+  const measuring = plan ? plan.measuring : 0;
   return `<div class="disc-figure">${discSvg({ segments: segs, capacity: cap, reserve: plan ? plan.reserve : 0, highlight: hot })}</div>
     <div class="capacity-line"><div class="capacity-big ${over ? "over" : ""}">${plan ? gb(used) : "0.0"}<small>of ${gb(cap)} GB</small></div>
-      <div class="capacity-free">${plan ? (over ? `${gb(used - cap)} GB too much` : `${gb(cap - used)} GB spare`) : "Add films to see the fit"}</div></div>
+      <div class="capacity-free">${plan ? (over ? `${gb(used - cap)} GB too much` : `${gb(cap - used)} GB free`) : "Add films to see the fit"}</div></div>
+    ${measuring ? `<div class="capacity-hint"><span class="spin" aria-hidden="true"></span>Measuring ${measuring === 1 ? "1 film" : measuring + " films"} for an accurate size</div>` : ""}
     <div class="segmented" role="group" aria-label="Disc type">${Object.entries(sizes).map(([k, v]) =>
       `<button aria-pressed="${k === S.project.disc_size}" data-size="${k}"><strong>${k}</strong><span>${gb(v)} GB</span></button>`).join("")}</div>
     ${plan ? `<dl class="facts">
-      <dt>Video per film</dt><dd>${(plan.video_kbps / 1000).toFixed(1)} Mbps</dd>
+      <dt>Video limit per film</dt><dd>${(plan.video_kbps / 1000).toFixed(1)} Mbps</dd>
       <dt>Picture quality</dt><dd>${qWord}</dd>
       <div class="quality-meter"><i style="width:${(qFrac * 100).toFixed(0)}%"></i></div>
       <dt>Running time</dt><dd>${fmtLong(plan.total_seconds)}</dd>
@@ -296,7 +301,7 @@ function discPane() {
     </dl>` : ""}
     ${plan && plan.warning ? `<div class="note warn">Only ${(plan.video_kbps / 1000).toFixed(1)} Mbps per film fits. ${S.project.disc_size !== "BD-100" ? "A bigger disc type would look noticeably better." : "Consider splitting the collection across two discs."}</div>` : ""}
     ${S.project.disc_size === "BD-100" && S.project.films.length ? `<div class="note">BD-100 discs need a player that supports BDXL. Most players from the last decade do; check yours before burning.</div>` : ""}
-    ${segs.length ? `<div class="legend">${segs.map((s) => `<div class="legend-row ${hot === s.index ? "hot" : ""}" data-hot="${s.index}"><i style="background:${s.color}"></i><span>${esc(s.title)}</span><span class="gb">${s.bytes ? gb(s.bytes) + " GB" : ""}</span></div>`).join("")}</div>` : ""}`;
+    ${segs.length ? `<div class="legend">${segs.map((s) => `<div class="legend-row ${hot === s.index ? "hot" : ""}" data-hot="${s.index}"><i style="background:${s.color}"></i><span>${esc(s.title)}</span><span class="gb" ${s.bytes && !s.exact ? 'title="A rough figure until the film has been measured"' : ""}>${s.bytes ? (s.exact ? "" : "about ") + gb(s.bytes) + " GB" : ""}</span></div>`).join("")}</div>` : ""}`;
 }
 
 function setHot(i) {

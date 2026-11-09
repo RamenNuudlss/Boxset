@@ -44,6 +44,7 @@ def main(project_path: str | None = None, browser: bool = False, port: int = 0):
             while True:
                 time.sleep(3600)
         except KeyboardInterrupt:
+            api._stop_measuring.set()
             return 0
 
     window = webview.create_window("Boxset", url, width=1380, height=880, min_size=(1120, 720),
@@ -72,6 +73,7 @@ def main(project_path: str | None = None, browser: bool = False, port: int = 0):
     window.events.loaded += on_loaded
 
     def on_closing():
+        api._stop_measuring.set()
         if api.status.get("running"):
             if api.job:
                 api.job.cancel()

@@ -230,6 +230,9 @@ main { height: calc(100% - var(--top-h)); }
 .capacity-big { font-size: 26px; font-weight: 620; font-stretch: 112%; letter-spacing: -.2px; }
 .capacity-big small { font-size: 14px; color: var(--text-3); font-weight: 450; font-stretch: 100%; letter-spacing: 0; margin-left: 4px; }
 .capacity-free { color: var(--text-2); font-size: 13px; }
+.capacity-hint { display: flex; align-items: center; gap: 8px; margin-top: -10px; color: var(--text-3); font-size: 12.5px; }
+.capacity-hint .spin { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--line); border-top-color: var(--laser); animation: spin .9s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .over { color: #FFB3B5; }
 
 .segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 3px; }

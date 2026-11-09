@@ -73,7 +73,7 @@ def load_media(coll, job: Job | None = None, refresh=False):
     """Probe every rip (cached by path, size and date). Returns (media, problems), where
     problems are the things that stop a build. Warnings are logged to the job."""
     os.makedirs(coll.build, exist_ok=True)
-    cache_p = os.path.join(coll.build, "probe2.cache")
+    cache_p = os.path.join(coll.build, "probe3.cache")
     cache = {}
     if os.path.exists(cache_p) and not refresh:
         try:
@@ -109,10 +109,13 @@ def load_media(coll, job: Job | None = None, refresh=False):
 
 def probe_one(path: str) -> dict:
     """Quick facts about one file for the app's film table."""
-    m = probe.probe(path)
+    return describe(probe.probe(path))
+
+
+def describe(m) -> dict:
     a = m.audio[0] if m.audio else None
     return {"duration": m.duration, "chapters": len(m.chapters), "fps": m.fps_label,
-            "width": m.width, "height": m.height, "size": os.path.getsize(path),
+            "width": m.width, "height": m.height, "size": os.path.getsize(m.path),
             "audio": f"{a.codec.upper()} {a.channels}ch" if a else "No audio",
             "problems": m.problems, **({"error": m.fatal[0][0].upper() + m.fatal[0][1:]} if m.fatal else {})}
 

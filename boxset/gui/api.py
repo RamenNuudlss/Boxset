@@ -14,10 +14,9 @@ import subprocess
 import sys
 import threading
 import time
-from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
-from .. import budget, core, pipeline, project as projmod
+from .. import budget, core, estimate, pipeline, probe, project as projmod
 from ..config import DISC_SIZES
 from ..project import Project
 
@@ -55,10 +54,14 @@ class Api:
         self._subs: list[queue.Queue] = []
         self._lock = threading.RLock()
         self._pool = ThreadPoolExecutor(max_workers=3)
+        self._measure_pool = ThreadPoolExecutor(max_workers=1)   # test encodes, one at a time
+        self._measuring: set[str] = set()
+        self._stop_measuring = threading.Event()
         self.job: pipeline.Job | None = None
         self.status = self._idle_status()
         self.settings_path = os.path.join(config_dir(), "settings.json")
         self.settings = self._load_settings()
+        self.estimates = estimate.Cache(estimate.default_cache_path())
 
     # ------------------------------------------------------------------ events
     def subscribe(self) -> queue.Queue:
@@ -217,12 +220,48 @@ class Api:
                 self._pool.submit(self._probe, p)
 
     def _probe(self, path):
+        media = None
         try:
-            info = pipeline.probe_one(path) if os.path.exists(path) else {"error": "File not found"}
+            if os.path.exists(path):
+                media = probe.probe(path)
+                info = pipeline.describe(media)
+            else:
+                info = {"error": "File not found"}
         except Exception as e:
             info = {"error": str(e).splitlines()[0][:200]}
+        if media is not None and "error" not in info:
+            known = self.estimates.get(path)
+            info["need"] = known or estimate.guess(media)
+            info["measured"] = bool(known)
         self.meta[path] = info
         self._probing.discard(path)
+        self.push({"type": "meta", "file": path, "meta": info})
+        if media is not None and "error" not in info and not info["measured"] and path not in self._measuring:
+            self._measuring.add(path)
+            self._measure_pool.submit(self._measure, path, media)
+
+    def _measure(self, path, media):
+        """Test-encode samples of the film to learn its real size on the disc."""
+        try:
+            if not any(f["file"] == path for f in self.project.films):
+                return                      # removed before its turn came
+            while self.status.get("running"):
+                if self._stop_measuring.wait(5):   # don't compete with a build
+                    return
+            rates = estimate.measure(media, self._stop_measuring)
+        except Exception:
+            rates = None
+        finally:
+            self._measuring.discard(path)
+        info = self.meta.get(path)
+        if info is None:
+            return
+        if rates:
+            self.estimates.put(path, rates)
+            info = dict(info, need=rates, measured=True)
+        else:
+            info = dict(info, measured=None)      # couldn't measure: keep the rough figure
+        self.meta[path] = info
         self.push({"type": "meta", "file": path, "meta": info})
 
     # ------------------------------------------------------------------ settings on the project
@@ -265,15 +304,18 @@ class Api:
 
     # ------------------------------------------------------------------ state
     def _plan(self):
-        durs = [self.meta.get(f["file"], {}).get("duration") for f in self.project.films]
-        known = [d for d in durs if d]
+        films = [(f["file"], self.meta.get(f["file"]) or {}) for f in self.project.films]
+        known = [(path, m) for path, m in films if m.get("duration")]
         if not known:
             return None
-        p = budget.plan(self.project.data["disc_size"], known, int(self.project.data.get("audio_kbps", 448)))
+        p = budget.plan(self.project.data["disc_size"], [m["duration"] for _, m in known],
+                        int(self.project.data.get("audio_kbps", 448)), [m.get("need") for _, m in known])
         return {"video_kbps": p.video_kbps, "estimated_bytes": p.estimated_bytes, "capacity": p.capacity,
-                "warning": p.warning, "complete": len(known) == len(durs), "total_seconds": sum(known),
+                "warning": p.warning, "complete": len(known) == len(films), "total_seconds": p.total_seconds,
                 "reserve": budget.MENU_RESERVE, "overhead": budget.MUX_OVERHEAD,
-                "audio_kbps": p.audio_kbps}
+                "audio_kbps": p.audio_kbps, "limited": p.limited,
+                "films": {path: {"bytes": b, "measured": m.get("measured")} for (path, m), b in zip(known, p.film_bytes)},
+                "measuring": sum(1 for _, m in known if m.get("measured") is False)}
 
     def state(self):
         d = self.project.data

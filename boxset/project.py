@@ -23,7 +23,10 @@ _TAGS = re.compile(
 def guess_title_year(path: str) -> tuple[str, int | None]:
     """'The.Fast.and.the.Furious.2001.1080p.BluRay.mkv' -> ('The Fast and the Furious', 2001)."""
     name = os.path.splitext(os.path.basename(path))[0]
-    name = re.sub(r"[._]+", " ", name).strip()
+    # keep the dots in initialisms ("A.I.Artificial" -> "A.I. Artificial", "E.T.the" -> "E.T. the")
+    name = re.sub(r"(?<![A-Za-z0-9])((?:[A-Za-z]\.){2,})",
+                  lambda m: m.group(1).replace(".", "\x00") + " ", name)
+    name = re.sub(r"[._]+", " ", name).replace("\x00", ".").strip()
     year = None
     m = re.search(r"[\(\[]\s*((?:19|20)\d{2})\s*[\)\]]", name)
     if not m:
@@ -39,7 +42,7 @@ def guess_title_year(path: str) -> tuple[str, int | None]:
     if name.islower() or name.isupper():
         small = {"a", "an", "and", "the", "of", "in", "on", "at", "to", "for", "or", "vs"}
         words = name.lower().split()
-        name = " ".join(w if i and w in small else w.capitalize() for i, w in enumerate(words))
+        name = " ".join(w.upper() if "." in w else w if i and w in small else w.capitalize() for i, w in enumerate(words))
     return name or os.path.basename(path), year
 
 

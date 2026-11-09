@@ -168,17 +168,32 @@ The disc on the right of the Films tab is drawn to scale. Data is written from t
 centre outwards, so each film is a ring whose area matches its share of the disc. Hover
 over a film to highlight its ring.
 
-Pick the disc type underneath: **BD-25**, **BD-50** or **BD-100**. Boxset then shares the
-disc between your films:
+Pick the disc type underneath: **BD-25**, **BD-50** or **BD-100**. The big number is
+how much of that disc your films will really use, and the figure beside it is the space
+still free.
+
+**How much space a film takes.** Boxset encodes at a steady picture quality, so a film
+only takes the data its scenes need: quiet, clean films take far less than grainy,
+detailed ones. To know the real figure, Boxset test-encodes twelve 3-second samples
+from across each film in the background, with the disc's own settings, which takes a
+minute or so per film and lands within about 10% of the finished size. Until a film is
+measured, its size shows as "about" a rough figure worked out from the file, and a line
+under the disc says how many films are still being measured. Measurements are remembered, so each file is only measured once.
+
+**The video limit.** So everything is guaranteed to fit, each disc type also sets a
+limit on how much video data a film can use:
 
 1. 1.5 GB is set aside for menus and the file system.
 2. About 5% goes to the Blu-ray stream format itself.
 3. Every film gets 448 kbps Dolby Digital audio.
 4. Everything left becomes video, shared evenly by running time, capped at 30 Mbps.
 
-**Video per film** and **Picture quality** show the result:
+Films that need less than the limit simply use less, which is the space you see as
+free. **Video limit per film** shows the limit and **Picture quality** shows what it
+means. When your films need less than the limit throughout, the disc doesn't hold them
+back and quality shows as **Same as your files**. Otherwise:
 
-| Video per film | Shown as |
+| Video limit per film | Shown as |
 |---|---|
 | 20 Mbps and up | Close to a retail disc |
 | 12–20 Mbps | Excellent |
@@ -187,7 +202,7 @@ disc between your films:
 | 3–5 Mbps | Fair, some softness |
 | under 3 Mbps | Heavily compressed |
 
-As a rule of thumb, this is how many hours of film fit at each quality:
+As a rule of thumb, this is how many hours of film fit at each limit:
 
 | Disc | 20 Mbps | 12 Mbps | 8 Mbps | 5 Mbps |
 |---|---|---|---|---|
@@ -195,9 +210,9 @@ As a rule of thumb, this is how many hours of film fit at each quality:
 | BD-50 | 5.0 h | 8.3 h | 12.2 h | 18.9 h |
 | BD-100 | 10.2 h | 16.8 h | 24.7 h | 38.3 h |
 
-The 11-film collection in the screenshots is 23 hours long: about 1.7 Mbps on a BD-25,
-4.0 Mbps on a BD-50 and 8.5 Mbps on a BD-100. The estimate is a ceiling, since simple
-scenes use less than their share, so finished discs usually come out a little smaller.
+These are worst cases, for films that need the whole limit. The 11-film collection in
+the screenshots is 23 hours long: a limit of about 1.7 Mbps on a BD-25, 4.0 Mbps on a
+BD-50 and 8.5 Mbps on a BD-100.
 
 ### 2. Menu
 
@@ -445,7 +460,7 @@ so run it by its full path:
 
 | Command | What it does |
 |---|---|
-| `boxset-cli check <project>` | Reads every film and prints its length, frame rate, chapters and audio, the disc-space plan, and anything that needs fixing |
+| `boxset-cli check <project>` | Reads every film and prints its length, frame rate, chapters and audio, the disc-space plan (with the sizes the app has measured, or rough figures until it has), and anything that needs fixing |
 | `boxset-cli themes <project>` | Lists the available themes (`*` marks the project's) |
 | `boxset-cli menus <project>` | Renders every menu screen and checks them against Blu-ray rules |
 | `boxset-cli preview <project>` | Saves `build\menus_preview.jpg`, a contact sheet of every screen |

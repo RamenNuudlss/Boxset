@@ -15,7 +15,7 @@ import argparse
 import sys
 import time
 
-from . import budget, config, core, pipeline, probe
+from . import budget, config, core, estimate, pipeline, probe
 from .config import ConfigError
 
 
@@ -57,7 +57,10 @@ def cmd_check(args):
             f"{m.width}x{m.height} {m.fps_label}fps  {len(m.chapters):>2} ch  {langs}")
     say()
     if len(media) == len(coll.films):
-        say(budget.plan(coll.disc_size, [m.duration for m in media.values()], coll.audio_kbps).describe())
+        sizes = estimate.Cache(estimate.default_cache_path())
+        ms = [media[f.number] for f in coll.films]
+        say(budget.plan(coll.disc_size, [m.duration for m in ms], coll.audio_kbps,
+                        [sizes.get(m.path) or estimate.guess(m) for m in ms]).describe())
     notes = [(f.number, p) for f in coll.films if f.number in media for p in media[f.number].problems]
     if notes:
         say("\nGood to know:")
@@ -92,7 +95,7 @@ def _run(args, **kw):
 def cmd_menus(args):
     if args.theme:
         # try a theme without editing the project file
-        import json, os, tempfile
+        import json, os
         with open(args.collection, encoding="utf-8") as fh:
             data = json.load(fh)
         data["theme"] = args.theme
