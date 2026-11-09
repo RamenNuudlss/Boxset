@@ -363,6 +363,20 @@ class Api:
             return self.set_option(key, res[0])
         return self.state()
 
+    def remove_theme(self, tid: str):
+        """Remove an installed theme pack. A project using it switches to the first
+        built-in theme, and its menus show as changed."""
+        self._busy_guard()
+        name = next((t["name"] for t in core.theme_catalog(self._coll_stub()) if t["id"] == tid), tid)
+        core.remove_theme(tid)
+        if self.project.data.get("theme") == tid:
+            fallback = next((t["id"] for t in core.theme_catalog(self._coll_stub()) if t["builtin"]), "tachometer")
+            self.project.set("theme", fallback)
+            self._changed()
+        self.push({"type": "themes"})
+        self.push({"type": "toast", "message": f"Removed {name}"})
+        return self.state()
+
     def install_theme(self, path: str | None = None):
         if not path:
             res = self._dialog("open", "Install a theme pack", ("Boxset theme (*.boxtheme;*.zip)",))

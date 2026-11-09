@@ -11,6 +11,8 @@ let view = "films";
 let openRow = null;        // expanded film row
 let hot = null;            // film highlighted by hover
 let manifest = null;       // rendered menus
+let removeArmed = null;    // installed theme waiting for a second click to remove
+let removeTimer = 0;
 let menusDirty = false;    // edits since the last menu render
 let pending = false;       // a re-render waiting for an input to lose focus
 const sim = { menu: null, sel: null, stack: [], card: null, flash: null };
@@ -333,12 +335,18 @@ function renderMenu() {
   const cards = S.themes.map((t) => {
     const lim = t.limits || {};
     const bad = nFilms && ((lim.max_films && nFilms > lim.max_films) || (lim.min_films && nFilms < lim.min_films));
-    return `<button class="theme-card" aria-pressed="${t.id === S.project.theme}" data-theme="${esc(t.id)}">
+    const where = t.source === "installed" ? "Installed theme pack" : t.source === "project" ? "From the project's themes folder" : "";
+    const armed = removeArmed === t.id;
+    return `<div class="theme-item">
+      <button class="theme-card" aria-pressed="${t.id === S.project.theme}" data-theme="${esc(t.id)}">
       ${t.preview_url ? `<img src="${t.preview_url}" alt="">` : `<div class="noimg"></div>`}
       <div class="tname">${esc(t.name)}</div>
       <div class="tdesc">${esc(t.description || "")}</div>
-      ${bad ? `<div class="tbadge" style="color:#F1D3A1">Fits ${lim.min_films}–${lim.max_films} films</div>` : (t.builtin ? "" : `<div class="tbadge">Installed theme pack</div>`)}
-    </button>`;
+      ${bad ? `<div class="tbadge" style="color:#F1D3A1">Fits ${lim.min_films}–${lim.max_films} films</div>` : (where ? `<div class="tbadge">${where}</div>` : "")}
+      </button>
+      ${t.source === "installed" ? `<button class="theme-remove ${armed ? "armed" : ""}" data-remove-theme="${esc(t.id)}"
+          aria-label="${armed ? "Click again to remove" : "Remove"} ${esc(t.name)}">${armed ? "Remove?" : "Remove"}</button>` : ""}
+    </div>`;
   }).join("");
   const screens = manifest ? manifest.menus.map((m) => `<option value="${esc(m.id)}" ${m.id === sim.menu ? "selected" : ""}>${esc(menuLabel(m.id))}</option>`).join("") : "";
   const rendering = S.job.running && S.job.kind === "menus";
@@ -871,6 +879,19 @@ document.addEventListener("click", async (ev) => {
     if (a === "open") { const r = await act("open_project"); if (r && r.__nodialog) { const p = prompt("Full path of a .boxset project:"); if (p) await act("open_project", p); } manifest = null; await loadManifest(true); render(); }
     if (a === "saveas") { const r = await act("save_project_as"); if (r && r.__nodialog) { const p = prompt("Save the project as (full path):"); if (p) await act("save_project_as", p); } }
     if (a === "folder") act("open_folder", "project");
+    return;
+  }
+  if (t.dataset.removeTheme) {
+    const id = t.dataset.removeTheme;
+    clearTimeout(removeTimer);
+    if (removeArmed === id) {
+      removeArmed = null;
+      const r = await act("remove_theme", id);
+      if (r) { menusDirty = true; render(); }
+    } else {
+      removeArmed = id; render();
+      removeTimer = setTimeout(() => { removeArmed = null; if (view === "menu") render(); }, 4000);
+    }
     return;
   }
   if (t.dataset.do) return doThing(t.dataset.do, t);

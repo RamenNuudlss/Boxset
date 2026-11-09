@@ -431,3 +431,11 @@ details summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
 .result .burner { margin-top: 12px; }
 
 .stage-actions { display: flex; gap: 8px; align-items: center; }
+
+/* removing an installed theme: overlaid on its card, second click confirms */
+.theme-item { position: relative; }
+.theme-remove { position: absolute; top: 14px; right: 14px; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  color: var(--text); background: rgba(20, 21, 26, .82); border: 1px solid var(--line-strong); opacity: 0; transition: opacity .12s; }
+.theme-item:hover .theme-remove, .theme-remove:focus-visible, .theme-remove.armed { opacity: 1; }
+.theme-remove:hover { background: #3A2729; border-color: #6A3A3D; color: #FFB3B5; }
+.theme-remove.armed { background: #5A2326; border-color: var(--err); color: #fff; }

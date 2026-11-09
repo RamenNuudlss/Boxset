@@ -470,7 +470,13 @@ frames from your own films.
 
 Themes are shared as `.boxtheme` files. Double-click one, or use **Install theme pack**
 at the bottom of the Menu tab's theme list. Installed packs appear in the list straight
-away and are kept in `%APPDATA%\Boxset\themes\`.
+away and are kept in `%APPDATA%\Boxset\themes\`. Installing a pack with the same name
+replaces the old one.
+
+To remove a pack, point at its card in the theme list and choose **Remove**, then
+**Remove?** to confirm. A project that was using it switches to a built-in theme. The
+built-in themes can't be removed, and themes in a project's own `themes` folder are left
+for you to delete yourself, since they're your files.
 
 > [!WARNING]
 > A theme pack contains program code that runs on your PC when menus are rendered.

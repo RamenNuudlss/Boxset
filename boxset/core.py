@@ -400,9 +400,22 @@ def theme_catalog(coll=None) -> list[dict]:
             info = {"name": tid, "description": f"Couldn't load: {e}", "options": [], "film_fields": [],
                     "broken": True}
         prev = next((os.path.join(d, n) for n in ("preview.jpg", "preview.png") if os.path.exists(os.path.join(d, n))), None)
-        out.append({"id": tid, "dir": d, "preview": prev,
-                    "builtin": os.path.dirname(d) == os.path.join(os.path.dirname(__file__), "themes"), **info})
+        parent = os.path.normcase(os.path.abspath(os.path.dirname(d)))
+        builtin = parent == os.path.normcase(os.path.abspath(os.path.join(os.path.dirname(__file__), "themes")))
+        installed = parent == os.path.normcase(os.path.abspath(user_theme_dir()))
+        out.append({"id": tid, "dir": d, "preview": prev, "builtin": builtin,
+                    "source": "builtin" if builtin else "installed" if installed else "project", **info})
     return out
+
+
+def remove_theme(tid: str) -> None:
+    """Delete an installed theme pack. Built-in themes and themes in a project's
+    own folder are never touched."""
+    root = os.path.abspath(user_theme_dir())
+    d = os.path.abspath(os.path.join(root, tid))
+    if os.path.dirname(d) != root or not os.path.exists(os.path.join(d, "theme.py")):
+        raise RuntimeError("Only installed theme packs can be removed.")
+    shutil.rmtree(d)
 
 
 # ----------------------------------------------------------------- checking
