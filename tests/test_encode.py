@@ -111,12 +111,17 @@ def test_hdr_is_converted_to_sdr(tmp_path):
     if not tracks.tonemap_available():
         pytest.skip("this FFmpeg has no zscale filter")
     src = tmp_path / "hdr.mkv"
-    ffmpeg("-f", "lavfi", "-i", "testsrc2=s=640x360:r=24000/1001", "-t", "3", "-c:v", "libx265", "-preset",
-           "ultrafast", "-pix_fmt", "yuv420p10le", "-x265-params",
+    # tagged three ways (the frames, the encoder, the HEVC stream itself), since
+    # FFmpeg versions differ in which of them reaches the file
+    ffmpeg("-f", "lavfi", "-i", "testsrc2=s=640x360:r=24000/1001", "-t", "3",
+           "-vf", "format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc",
+           "-c:v", "libx265", "-preset", "ultrafast", "-x265-params",
            "log-level=error:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc",
            "-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc", src)
     m = probe.probe(str(src))
-    assert m.hdr == "hdr10" and any("HDR" in p for p in m.problems)
+    seen = {k: v for k, v in streams(src)[0].items() if k.startswith("color") or k in ("pix_fmt", "codec_name")}
+    assert m.hdr == "hdr10", f"ffprobe reports {seen}"
+    assert any("HDR" in p for p in m.problems)
     out, recipe, _, _ = _encode(tmp_path, m, _settings())
     v = _by_id(out)[0x1011]
     assert recipe.tonemap == "hdr10" and v["pix_fmt"] == "yuv420p" and v.get("color_transfer") == "bt709"
