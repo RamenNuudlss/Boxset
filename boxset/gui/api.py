@@ -6,6 +6,7 @@ progress events to the interface.
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import queue
@@ -17,7 +18,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from .. import budget, burner, core, encoders, estimate, pipeline, probe, project as projmod
+from .. import budget, burner, core, encoders, estimate, pipeline, probe, project as projmod, winfix
 from ..config import DISC_SIZES
 from ..project import Project
 
@@ -45,6 +46,17 @@ def _slug(s: str) -> str:
     return re.sub(r"\s+", " ", s) or "Untitled collection"
 
 
+def _locked(fn):
+    """Run a method while holding the state lock. Requests arrive on a thread each,
+    and the probing, measuring and job threads report in too, so everything that
+    reads or changes the project, the film facts or the job status takes turns."""
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        with self._state_lock:
+            return fn(self, *args, **kwargs)
+    return wrapper
+
+
 class Api:
     def __init__(self):
         self.window = None                    # set by app.py in desktop mode
@@ -53,7 +65,8 @@ class Api:
         self.meta: dict[str, dict] = {}        # file path -> facts from probing
         self._probing: set[str] = set()
         self._subs: list[queue.Queue] = []
-        self._lock = threading.RLock()
+        self._lock = threading.RLock()                # event subscribers
+        self._state_lock = threading.RLock()          # project, film facts, job status, settings
         self._pool = ThreadPoolExecutor(max_workers=3)
         self._measure_pool = ThreadPoolExecutor(max_workers=1)   # test encodes, one at a time
         self._measuring: set[tuple[str, int]] = set()
@@ -63,6 +76,7 @@ class Api:
         self.status = self._idle_status()
         self.settings_path = os.path.join(config_dir(), "settings.json")
         self.settings = self._load_settings()
+        core.restrict_project_themes(self.settings.get("trusted_theme_folders", []))
         self.estimates = estimate.Cache(estimate.default_cache_path())
         self.gpu, self.gpu_checked = None, False
         threading.Thread(target=self._detect_gpu, daemon=True).start()
@@ -95,13 +109,17 @@ class Api:
         except (OSError, ValueError):
             return {"recent": []}
 
+    @_locked
     def _save_settings(self):
+        tmp = self.settings_path + ".tmp"
         try:
-            with open(self.settings_path, "w", encoding="utf-8") as fh:
+            with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(self.settings, fh, indent=1)
+            os.replace(tmp, self.settings_path)
         except OSError:
             pass
 
+    @_locked
     def _remember(self, path):
         rec = [p for p in self.settings.get("recent", []) if os.path.normcase(p) != os.path.normcase(path)]
         self.settings["recent"] = [path] + rec[:7]
@@ -109,6 +127,7 @@ class Api:
         self._save_settings()
 
     # ------------------------------------------------------------------ project
+    @_locked
     def _ensure_path(self):
         if self.project.path:
             return
@@ -118,8 +137,10 @@ class Api:
         while os.path.exists(folder):
             folder, n = os.path.join(base, f"{name} {n}"), n + 1
         self.project.save(os.path.join(folder, f"{name}.boxset"))
+        self._trust_folder(folder)      # a folder the app just made holds nothing but this project
         self._remember(self.project.path)
 
+    @_locked
     def _changed(self):
         """Autosave after every edit, once there's something worth saving."""
         if self.project.films or self.project.path:
@@ -135,6 +156,7 @@ class Api:
             except (OSError, ValueError):
                 pass
 
+    @_locked
     def _open(self, path):
         self.project = Project.open(path)
         self.project.data.setdefault("name", os.path.splitext(os.path.basename(path))[0])
@@ -142,6 +164,7 @@ class Api:
         self._remember(path)
         self._probe_missing()
 
+    @_locked
     def new_project(self):
         self._busy_guard()
         self.project = Project()
@@ -168,9 +191,10 @@ class Api:
             path = res if isinstance(res, str) else res[0]
         if not path.lower().endswith(".boxset"):
             path += ".boxset"
-        self.project.save(path)
-        self._remember(path)
-        return self.state()
+        with self._state_lock:
+            self.project.save(path)
+            self._remember(path)
+            return self.state()
 
     def recent(self):
         return [{"path": p, "name": os.path.splitext(os.path.basename(p))[0], "exists": os.path.exists(p)}
@@ -185,6 +209,7 @@ class Api:
         res = self._dialog("folder", "Add a folder of movies")
         return self.add_paths(res) if res else self.state()
 
+    @_locked
     def add_paths(self, paths):
         self._busy_guard()
         paths = [p for p in (paths or []) if p]
@@ -197,11 +222,13 @@ class Api:
         self.push({"type": "films", "added": len(added)})
         return self.state()
 
+    @_locked
     def update_film(self, index: int, fields: dict):
         self.project.update_film(int(index), fields or {})
         self._changed()
         return self.state()
 
+    @_locked
     def move_film(self, src: int, dst: int):
         self._busy_guard()
         self.project.move_film(int(src), int(dst))
@@ -209,6 +236,7 @@ class Api:
         self._changed()
         return self.state()
 
+    @_locked
     def remove_film(self, index: int):
         self._busy_guard()
         self.project.remove_film(int(index))
@@ -219,6 +247,7 @@ class Api:
     def _clear_order_option(self):
         self.project.data.get("theme_options", {}).pop("timeline_order", None)
 
+    @_locked
     def _probe_missing(self):
         for f in self.project.films:
             p = f["file"]
@@ -256,8 +285,9 @@ class Api:
             info["rates"] = {f"{c}/{p}": r for c in (encoders.CRF_STANDARD, encoders.CRF_SAVE_SPACE)
                              for p in ("medium", "veryfast") if (r := self.estimates.get(path, c, p))}
             info["guess"] = estimate.guess(media)
-        self.meta[path] = info
-        self._probing.discard(path)
+        with self._state_lock:
+            self.meta[path] = info
+            self._probing.discard(path)
         self.push({"type": "meta", "file": path, "meta": info})
         self._measure_missing()
 
@@ -284,6 +314,7 @@ class Api:
             est = [x * encoders.GPU_FACTOR for x in est]
         return est, state
 
+    @_locked
     def _measure_missing(self):
         for f in self.project.films:
             path, m = f["file"], self.meta.get(f["file"]) or {}
@@ -301,8 +332,11 @@ class Api:
         """Test-encode samples of the film to learn its real size on the disc."""
         key, rates = f"{crf}/{preset}", None
         try:
-            m = self.meta.get(path) or {}
-            if not any(f["file"] == path for f in self.project.films) or self._profile(m)[:2] != (crf, preset):
+            with self._state_lock:
+                m = self.meta.get(path) or {}
+                wanted = (any(f["file"] == path for f in self.project.films)
+                          and self._profile(m)[:2] == (crf, preset))
+            if not wanted:
                 return                      # removed, or the settings changed, before its turn came
             while self.status.get("running"):
                 if self._stop_measuring.wait(5):   # don't compete with a build
@@ -314,16 +348,18 @@ class Api:
             rates = None
         finally:
             self._measuring.discard((path, key))
-        info = self.meta.get(path)
-        if info is None:
-            return
-        info = dict(info)
         if rates:
             self.estimates.put(path, rates, crf, preset)
-            info["rates"] = dict(info.get("rates") or {}, **{key: rates})
-        else:
-            info["failed"] = list(info.get("failed", [])) + [key]   # keep the rough figure
-        self.meta[path] = info
+        with self._state_lock:
+            info = self.meta.get(path)
+            if info is None:
+                return
+            info = dict(info)
+            if rates:
+                info["rates"] = dict(info.get("rates") or {}, **{key: rates})
+            else:
+                info["failed"] = list(info.get("failed", [])) + [key]   # keep the rough figure
+            self.meta[path] = info
         self.push({"type": "meta", "file": path, "meta": info})
 
     def _detect_gpu(self):
@@ -336,6 +372,7 @@ class Api:
         self._measure_missing()        # sizes on the graphics card use other measurements
 
     # ------------------------------------------------------------------ settings on the project
+    @_locked
     def set(self, key: str, value):
         if key == "name":
             self.project.data["name"] = str(value).strip()[:80] or "Untitled collection"
@@ -351,6 +388,7 @@ class Api:
             self._measure_missing()
         return self.state()
 
+    @_locked
     def set_option(self, key: str, value):
         self.project.set_option(key, value)
         self._changed()
@@ -363,6 +401,7 @@ class Api:
             return self.set_option(key, res[0])
         return self.state()
 
+    @_locked
     def remove_theme(self, tid: str):
         """Remove an installed theme pack. A project using it switches to the first
         built-in theme, and its menus show as changed."""
@@ -376,6 +415,26 @@ class Api:
         self.push({"type": "themes"})
         self.push({"type": "toast", "message": f"Removed {name}"})
         return self.state()
+
+    def _trust_folder(self, folder):
+        folders = self.settings.setdefault("trusted_theme_folders", [])
+        if not any(os.path.normcase(f) == os.path.normcase(folder) for f in folders):
+            folders.append(folder)
+            self._save_settings()
+        core.restrict_project_themes(folders)
+
+    @_locked
+    def trust_project_themes(self):
+        """The user's go-ahead to load the themes in this project's own folder.
+        Themes are programs, so nothing in that folder runs before this."""
+        if not self.project.path:
+            return self.state()
+        self._trust_folder(os.path.dirname(os.path.abspath(self.project.path)))
+        self.push({"type": "themes"})
+        return self.state()
+
+    def _untrusted_themes(self):
+        return core.untrusted_project_themes(self._coll_stub()) if self.project.path else []
 
     def install_theme(self, path: str | None = None):
         if not path:
@@ -422,6 +481,7 @@ class Api:
                 out[sp] = {"bytes": p["estimated_bytes"], "exact": p["exact"]}
         return out
 
+    @_locked
     def state(self):
         d = self.project.data
         themes = []
@@ -438,6 +498,7 @@ class Api:
             "folder_display": self._short(os.path.dirname(self.project.path)) if self.project.path else None,
             "meta": {f["file"]: self.meta.get(f["file"]) for f in self.project.films},
             "themes": themes,
+            "untrusted_themes": self._untrusted_themes(),
             "plan": self._plan(),
             "sizes": {k: v for k, v in DISC_SIZES.items()},
             "job": self.status,
@@ -520,6 +581,7 @@ class Api:
             self.job.cancel()
         return self.state()
 
+    @_locked
     def clear_menus(self):
         """Delete the rendered menus so the next render starts from nothing. Chapter
         frames are kept; they only depend on the films."""
@@ -549,6 +611,7 @@ class Api:
     def make_iso(self):
         return self._start("iso")
 
+    @_locked
     def _start(self, kind, **kw):
         self._busy_guard()
         if not self.project.films:
@@ -566,6 +629,10 @@ class Api:
         self.push({"type": "job", "status": "start", "kind": kind})
         return self.state()
 
+    def _set_status(self, **kw):
+        with self._state_lock:
+            self.status.update(**kw)
+
     def _run_job(self, kind, path, kw):
         try:
             if kind == "iso":
@@ -574,26 +641,32 @@ class Api:
                 folder = os.path.join(coll.build, "disc")
                 if not os.path.isdir(os.path.join(folder, "BDMV")):
                     raise RuntimeError("Build the disc first.")
-                out = iso.make_iso(folder, os.path.join(coll.build, f"{coll.label}.iso"), coll.label,
-                                   coll.disc_size, self.job)
+                with winfix.keep_awake():
+                    out = iso.make_iso(folder, os.path.join(coll.build, f"{coll.label}.iso"), coll.label,
+                                       coll.disc_size, self.job)
                 result = {"iso": out, "folder": folder}
             else:
                 result = pipeline.run(path, self.job, **kw)
                 if kind == "menus":
                     result = {"screens": len(result["manifest"]["menus"])}
-            self.status.update(running=False, result=result)
+            self._set_status(running=False, result=result)
             self.push({"type": "job", "status": "done", "kind": kind, "result": result})
         except pipeline.Cancelled:
-            self.status.update(running=False, error="Cancelled")
+            self._set_status(running=False, error="Cancelled")
             self.push({"type": "job", "status": "cancelled", "kind": kind})
         except Exception as e:  # report every failure to the interface
             msg = str(e) or e.__class__.__name__
-            self.status.update(running=False, error=msg)
+            self._set_status(running=False, error=msg)
             self.push({"type": "job", "status": "error", "kind": kind, "message": msg})
         finally:
             self.job = None
 
     def _on_event(self, e):
+        with self._state_lock:
+            self._note_event(e)
+        self.push(e)
+
+    def _note_event(self, e):
         st = self.status
         t = e.get("type")
         if t == "stage":
@@ -612,7 +685,6 @@ class Api:
             st["log"] = (st["log"] + [e])[-200:]
         elif t == "plan":
             st["plan"] = e
-        self.push(e)
 
     def cancel(self):
         if self.job:
@@ -649,6 +721,7 @@ class Api:
         threading.Thread(target=self._detect_burners, daemon=True).start()
         return self.state()
 
+    @_locked
     def set_burner(self, drive_id: str):
         self.settings["burner"] = drive_id
         self._save_settings()

@@ -121,8 +121,8 @@ class Project:
                 if k == "year":
                     v = int(v) if str(v).strip().isdigit() else None
                 f[k] = v
-            elif k.startswith("x_"):          # theme-specific extra fields
-                f[k[2:]] = v
+            elif k.startswith("x_") and k[2:] not in allowed and k[2:] != "file":
+                f[k[2:]] = v                  # theme-specific extra fields, never the film's own
 
     def move_film(self, src: int, dst: int):
         f = self.films.pop(src)

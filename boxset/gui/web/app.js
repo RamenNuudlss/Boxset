@@ -371,13 +371,18 @@ function renderMenu() {
           aria-label="${armed ? "Click again to remove" : "Remove"} ${esc(t.name)}">${armed ? "Remove?" : "Remove"}</button>` : ""}
     </div>`;
   }).join("");
+  const waiting = S.untrusted_themes || [];
+  const trust = waiting.length ? `<div class="note warn theme-trust">
+      <div>This project's folder has ${waiting.length > 1 ? "its own themes" : "its own theme"}: <strong>${waiting.map(esc).join(", ")}</strong>.
+      Themes are programs that run on your PC. Allow ${waiting.length > 1 ? "them" : "it"} only if you trust where this project came from.</div>
+      <button class="btn small" data-do="trust-themes">Allow ${waiting.length > 1 ? "these themes" : "this theme"}</button></div>` : "";
   const screens = manifest ? manifest.menus.map((m) => `<option value="${esc(m.id)}" ${m.id === sim.menu ? "selected" : ""}>${esc(menuLabel(m.id))}</option>`).join("") : "";
   const rendering = S.job.running && S.job.kind === "menus";
   const stale = manifest && (menusDirty || manifest.theme !== S.project.theme);
   el.innerHTML = `
     <div class="theme-pane">
       <div class="pane-head"><div><h2>Theme</h2><div class="sub">The look of every screen on the disc</div></div></div>
-      <div class="theme-list">${cards}</div>
+      <div class="theme-list">${cards}${trust}</div>
       <div class="theme-foot"><button class="btn" data-do="install-theme">Install theme pack</button></div>
     </div>
     <div class="stage-pane">
@@ -870,6 +875,7 @@ async function doThing(what, el) {
       else if (r && r.installed) toast("Theme installed");
       break;
     }
+    case "trust-themes": await act("trust_project_themes"); break;
     case "open-disc": act("open_folder", "disc"); break;
     case "make-iso": await act("make_iso"); break;
     case "burn": act("burn"); break;

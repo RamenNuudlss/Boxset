@@ -318,9 +318,41 @@ def user_theme_dir() -> str:
     return d
 
 
+# Themes are code, so a project's own "themes" folder is only loaded from folders the
+# user has allowed: opening a project someone sent you must not run what came with it.
+# None means no restriction, which is what the command line uses (running it on a
+# project is itself the go-ahead). The app narrows this to the folders in its settings.
+_TRUSTED_PROJECT_DIRS: set[str] | None = None
+
+
+def _norm(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
+def restrict_project_themes(trusted_folders) -> None:
+    """Only load project themes from these project folders (None lifts the limit)."""
+    global _TRUSTED_PROJECT_DIRS
+    _TRUSTED_PROJECT_DIRS = None if trusted_folders is None else {_norm(d) for d in trusted_folders}
+
+
+def project_themes_trusted(coll) -> bool:
+    return _TRUSTED_PROJECT_DIRS is None or _norm(coll.base_dir) in _TRUSTED_PROJECT_DIRS
+
+
+def untrusted_project_themes(coll) -> list[str]:
+    """Themes in the project's own folder that are waiting for the user's go-ahead.
+    Found by name only: nothing in them is loaded."""
+    if coll is None or project_themes_trusted(coll):
+        return []
+    root = os.path.join(coll.base_dir, "themes")
+    if not os.path.isdir(root):
+        return []
+    return [n for n in sorted(os.listdir(root)) if os.path.exists(os.path.join(root, n, "theme.py"))]
+
+
 def theme_dirs(coll=None) -> list[str]:
     dirs = []
-    if coll is not None:
+    if coll is not None and project_themes_trusted(coll):
         dirs.append(os.path.join(coll.base_dir, "themes"))
     dirs += [user_theme_dir(), os.path.join(os.path.dirname(__file__), "themes")]
     return dirs
@@ -372,6 +404,9 @@ def load_theme(coll, name: str, options: dict):
     if name in themes:
         cls = _theme_class(name, themes[name])
         return cls(options), themes[name]
+    if name in untrusted_project_themes(coll):
+        raise RuntimeError(f"The theme '{name}' is in this project's themes folder, which hasn't been allowed "
+                           "to run yet. Allow it on the Menu page, or pick another theme.")
     raise RuntimeError(f"No theme called '{name}'. Available: {', '.join(themes) or 'none'}")
 
 

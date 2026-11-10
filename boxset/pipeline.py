@@ -12,14 +12,13 @@ import dataclasses
 import hashlib
 import json
 import os
-import pickle
 import shutil
 import subprocess
 import threading
 import time
 from fractions import Fraction
 
-from . import budget, chapters, config, core, encoders, estimate, probe, thumbs
+from . import budget, chapters, config, core, encoders, estimate, probe, thumbs, winfix
 
 DISC_FPS = {
     Fraction(24000, 1001): (24000, 1001),
@@ -74,14 +73,23 @@ def load_media(coll, job: Job | None = None, refresh=False):
     """Probe every rip (cached by path, size and date). Returns (media, problems), where
     problems are the things that stop a build. Warnings are logged to the job."""
     os.makedirs(coll.build, exist_ok=True)
-    cache_p = os.path.join(coll.build, "probe3.cache")
+    # JSON, not pickle: a build folder can arrive with a project from someone else,
+    # and reading a cache must never be able to run anything.
+    cache_p = os.path.join(coll.build, "probe.json")
     cache = {}
     if os.path.exists(cache_p) and not refresh:
         try:
-            with open(cache_p, "rb") as fh:
-                cache = pickle.load(fh)
-        except Exception:
+            with open(cache_p, encoding="utf-8") as fh:
+                cache = json.load(fh)
+        except (OSError, ValueError):
             cache = {}
+        if not isinstance(cache, dict):
+            cache = {}
+    try:
+        os.remove(os.path.join(coll.build, "probe3.cache"))     # the cache earlier versions wrote
+    except OSError:
+        pass
+    fresh = {}
     media, problems = {}, []
     for film in coll.films:
         if job:
@@ -90,13 +98,19 @@ def load_media(coll, job: Job | None = None, refresh=False):
         if not os.path.exists(path):
             problems.append((film.number, f"File not found: {path}"))
             continue
-        key = (path, os.path.getsize(path), int(os.path.getmtime(path)))
+        key = f"{path}|{os.path.getsize(path)}|{int(os.path.getmtime(path))}"
+        m = None
+        if key in cache:
+            try:
+                m = probe.from_dict(cache[key])
+            except (TypeError, ValueError, KeyError, IndexError):
+                m = None                 # written by another version: read the file again
         try:
-            m = cache.get(key) or probe.probe(path)
+            m = m or probe.probe(path)
         except RuntimeError as e:
             problems.append((film.number, str(e)))
             continue
-        cache[key] = m
+        fresh[key] = probe.to_dict(m)
         minutes = getattr(coll, "auto_chapters", 0)
         if minutes and chapters.needs_chapters(m):
             m = dataclasses.replace(m, chapters=list(m.chapters))
@@ -108,8 +122,13 @@ def load_media(coll, job: Job | None = None, refresh=False):
         for p in m.problems:
             if job:
                 job.log(f"{film.title}: {p}", "warn")
-    with open(cache_p, "wb") as fh:
-        pickle.dump(cache, fh)
+    tmp = cache_p + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(fresh, fh)
+        os.replace(tmp, cache_p)
+    except OSError:
+        pass                             # the cache only saves time
     return media, problems
 
 
@@ -469,11 +488,49 @@ def assemble(coll, media, manifest, clips, job: Job, fast=False) -> dict:
             "chapters": sum(result["chapters"])}
 
 
+# --------------------------------------------------------------------- disc space
+
+def space_needed(coll, media, make_iso=False, sizes=None) -> int:
+    """Roughly how many bytes of working space the build still needs in the build
+    folder: the films not encoded yet, the menus, and the disc image if one is made.
+    (The disc folder itself reuses the encoded films, so it adds almost nothing.)"""
+    crf = encoders.crf_for(getattr(coll, "save_space", False))
+    sizes = sizes or estimate.Cache(estimate.default_cache_path())
+    ms = [media[f.number] for f in coll.films]
+    needs = [sizes.get(m.path, crf) or estimate.guess(m, crf) for m in ms]
+    p = budget.plan(coll.disc_size, [m.duration for m in ms], coll.audio_kbps, needs)
+    to_encode = sum(b for m, b in zip(ms, p.film_bytes) if not os.path.exists(clip_path(coll, m)))
+    return to_encode + budget.MENU_RESERVE + (p.estimated_bytes if make_iso else 0)
+
+
+def check_space(coll, media, job: Job, make_iso=False):
+    """Say so before hours of encoding, not after, when the drive is too full. The
+    figure is an estimate, so only a drive that is clearly too small stops the build."""
+    try:
+        free = shutil.disk_usage(coll.build).free
+    except OSError:
+        return
+    need = space_needed(coll, media, make_iso)
+    if free >= need:
+        return
+    msg = (f"This build needs about {need / 1e9:.0f} GB of free space in {coll.build}, "
+           f"and the drive has {free / 1e9:.0f} GB.")
+    if free < need * 0.5:
+        raise RuntimeError(msg + " Free up some space, or move the project to a drive with more room.")
+    job.log(msg + " It may run out before the disc is finished.", "warn")
+
+
 # --------------------------------------------------------------------- everything
 
 def run(collection_path: str, job: Job, menus_only=False, skip_encode=False, fast=False,
         make_iso=False, force_menus=False) -> dict:
     """Rips -> menus -> encoded films -> BDMV folder (-> ISO). Returns a summary."""
+    with winfix.keep_awake():
+        return _run(collection_path, job, menus_only, skip_encode, fast, make_iso, force_menus)
+
+
+def _run(collection_path: str, job: Job, menus_only=False, skip_encode=False, fast=False,
+        make_iso=False, force_menus=False) -> dict:
     coll = config.load(collection_path)
     job.stage("check", "start", "Reading your films")
     media, problems = load_media(coll, job)
@@ -484,6 +541,8 @@ def run(collection_path: str, job: Job, menus_only=False, skip_encode=False, fas
               "capacity": plan.capacity, "warning": plan.warning})
     if plan.warning:
         job.log(plan.warning.capitalize(), "warn")
+    if not menus_only and not fast:        # test builds are a fraction of the size
+        check_space(coll, media, job, make_iso)
     job.stage("check", "done", f"{len(coll.films)} films ready")
 
     manifest = render_menus(coll, media, job, force=force_menus)

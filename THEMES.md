@@ -27,7 +27,9 @@ mix both.
 
 A main menu with the collection's title and one button per film. Save it as
 `themes/simple-list/theme.py` next to a project file, and it appears in the
-app's theme list.
+app's theme list. (If the Menu tab shows a note asking whether to allow the
+project's themes, choose **Allow**: Boxset asks once before running themes from a
+project folder it didn't create.)
 
 ```python
 from boxset.core import BaseTheme, act

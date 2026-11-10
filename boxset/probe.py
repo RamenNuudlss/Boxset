@@ -1,6 +1,7 @@
 """Reads what's inside each rip with ffprobe: length, frame rate, chapters, audio."""
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import shutil
@@ -44,6 +45,22 @@ class Media:
     @property
     def fps_label(self) -> str:
         return BLURAY_FPS.get(self.fps, f"{float(self.fps):.3f}")
+
+
+def to_dict(m: Media) -> dict:
+    """A Media as plain JSON data (for the probe cache)."""
+    d = dataclasses.asdict(m)
+    d["fps"] = [m.fps.numerator, m.fps.denominator]
+    return d
+
+
+def from_dict(d: dict) -> Media:
+    """The reverse of to_dict. Raises (TypeError, ValueError, KeyError) on data
+    written by a different version, which callers treat as "not cached"."""
+    d = dict(d)
+    d["fps"] = Fraction(int(d["fps"][0]), int(d["fps"][1]))
+    d["audio"] = [AudioStream(**a) for a in d.get("audio", [])]
+    return Media(**d)
 
 
 def need(tool: str) -> str:

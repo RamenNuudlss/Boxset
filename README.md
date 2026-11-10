@@ -491,6 +491,11 @@ for you to delete yourself, since they're your files.
 > A theme pack contains program code that runs on your PC when menus are rendered.
 > Only install theme packs from people you trust.
 
+The same goes for themes in a project's own `themes` folder. The first time you open a
+project whose folder has one, the Menu tab lists those themes and asks before using
+them; nothing in the folder runs until you choose **Allow**. Projects you make in the app
+don't ask.
+
 ### Making your own
 
 Themes are written in Python, drawing screens either with code or as ordinary web pages
