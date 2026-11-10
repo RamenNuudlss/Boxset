@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]      # test build: installer is attached to the run
     tags: ["v*"]          # release: installer is also attached to the GitHub release
+  pull_request:           # tests and a trial build before anything is merged
   workflow_dispatch:
 
 permissions:
@@ -12,17 +13,26 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      # The build's outside parts, each pinned to an exact version. To update one,
+      # change it here (and its checksum) on purpose.
+      FFMPEG_VERSION: "9.0.2"
+      FFMPEG_SHA256: "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba"
+      # Optional code signing: add these two repository secrets to sign the app and
+      # the installer. Without them the build is the same, just unsigned.
+      SIGN_PFX: ${{ secrets.WINDOWS_CERT_PFX }}            # the .pfx certificate, base64
+      SIGN_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      # actions are pinned to the exact commit behind each version tag
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262          # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065      # v5
         with:
           python-version: "3.12"
 
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements-dev.txt
 
       - name: Version from tag
         shell: bash
@@ -30,6 +40,8 @@ jobs:
           v="${GITHUB_REF_NAME#v}"
           [[ "$GITHUB_REF_TYPE" == "tag" ]] || v="0.0.0-dev"
           echo "APP_VERSION=$v" >> $GITHUB_ENV
+          # the app reads its own version from here (the update check compares it)
+          echo "__version__ = \"$v\"" > boxset/_version.py
 
       - name: Build the app
         run: pyinstaller --noconfirm packaging/boxset.spec
@@ -37,8 +49,10 @@ jobs:
       - name: Bundle FFmpeg (GPL build with x264)
         shell: pwsh
         run: |
-          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-          Invoke-WebRequest $url -OutFile ffmpeg.zip
+          $zip = "ffmpeg-$env:FFMPEG_VERSION-essentials_build.zip"
+          Invoke-WebRequest "https://github.com/GyanD/codexffmpeg/releases/download/$env:FFMPEG_VERSION/$zip" -OutFile ffmpeg.zip
+          $got = (Get-FileHash ffmpeg.zip -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $env:FFMPEG_SHA256) { throw "FFmpeg download doesn't match its checksum: $got" }
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg
           $bin = Get-ChildItem ffmpeg -Recurse -Filter ffmpeg.exe | Select-Object -First 1
           New-Item -ItemType Directory -Force dist/Boxset/bin | Out-Null
@@ -49,8 +63,31 @@ jobs:
           Copy-Item THIRD_PARTY_NOTICES.md dist/Boxset/
 
       - name: Fetch the WebView2 installer (used only on PCs that lack it)
+        # Microsoft publishes this small installer at one address with no version
+        # number, so it's checked by its signature: it must be signed by Microsoft.
         shell: pwsh
-        run: Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile packaging/MicrosoftEdgeWebview2Setup.exe
+        run: |
+          Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile packaging/MicrosoftEdgeWebview2Setup.exe
+          $sig = Get-AuthenticodeSignature packaging/MicrosoftEdgeWebview2Setup.exe
+          if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "O=Microsoft Corporation") {
+            throw "The WebView2 installer isn't signed by Microsoft: $($sig.Status) $($sig.SignerCertificate.Subject)"
+          }
+
+      - name: Tests (with the bundled FFmpeg)
+        shell: pwsh
+        run: |
+          $env:PATH = "$PWD\dist\Boxset\bin;$env:PATH"
+          python -m pytest tests -q
+
+      - name: Check the bundled FFmpeg has what Boxset uses
+        shell: bash
+        run: |
+          f=dist/Boxset/bin/ffmpeg.exe
+          "$f" -hide_banner -filters  | grep -qw zscale    || { echo "no zscale filter (HDR conversion)"; exit 1; }
+          "$f" -hide_banner -filters  | grep -qw tonemap   || { echo "no tonemap filter (HDR conversion)"; exit 1; }
+          "$f" -hide_banner -bsfs     | grep -qw dca_core  || { echo "no dca_core (DTS copying)"; exit 1; }
+          "$f" -hide_banner -demuxers | grep -qw sup       || { echo "no sup demuxer (subtitles)"; exit 1; }
+          "$f" -hide_banner -encoders | grep -qw libx264   || { echo "no libx264"; exit 1; }
 
       - name: Smoke test
         run: |
@@ -97,19 +134,30 @@ jobs:
           print("drives:", burner.list_drives())
           EOF
 
+      - name: Sign the app
+        if: env.SIGN_PFX != ''
+        shell: pwsh
+        run: packaging/sign.ps1 dist/Boxset/Boxset.exe, dist/Boxset/boxset-cli.exe
+
       - name: Build the installer
         shell: pwsh
         run: |
           choco install innosetup -y --no-progress
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:APP_VERSION" packaging/installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "The installer didn't build." }
 
-      - uses: actions/upload-artifact@v4
+      - name: Sign the installer
+        if: env.SIGN_PFX != ''
+        shell: pwsh
+        run: packaging/sign.ps1 (Get-ChildItem dist/BoxsetSetup-*.exe).FullName
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4
         with:
           name: BoxsetSetup
           path: dist/BoxsetSetup-*.exe
 
       - name: Attach to the GitHub release
         if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65   # v2
         with:
           files: dist/BoxsetSetup-*.exe

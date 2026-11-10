@@ -21,7 +21,7 @@ mimetypes.add_type("text/javascript", ".js")
 PUBLIC_METHODS = {
     "state", "manifest", "recent", "new_project", "open_project", "save_project_as", "pick_files", "pick_folder",
     "add_paths", "cancel_render", "clear_menus", "remove_theme", "refresh_burners", "set_burner", "update_film", "move_film", "remove_film", "set", "set_option", "pick_option_file",
-    "install_theme", "trust_project_themes", "render_menus", "build", "make_iso", "cancel", "open_folder", "burn",
+    "install_theme", "trust_project_themes", "open_update", "render_menus", "build", "make_iso", "cancel", "open_folder", "burn",
 }
 
 

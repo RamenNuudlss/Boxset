@@ -16,9 +16,11 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from concurrent.futures import ThreadPoolExecutor
 
-from .. import budget, burner, core, encoders, estimate, pipeline, probe, project as projmod, winfix
+from .. import __version__, updates
+from .. import budget, burner, core, encoders, estimate, pipeline, probe, project as projmod, tracks, winfix
 from ..config import DISC_SIZES
 from ..project import Project
 
@@ -77,6 +79,9 @@ class Api:
         self.settings_path = os.path.join(config_dir(), "settings.json")
         self.settings = self._load_settings()
         core.restrict_project_themes(self.settings.get("trusted_theme_folders", []))
+        self.update = None                            # {"version", "url"} once a newer release is found
+        if self.settings.get("check_updates", True) and not os.environ.get("BOXSET_NO_UPDATE_CHECK"):
+            threading.Thread(target=self._check_update, daemon=True).start()
         self.estimates = estimate.Cache(estimate.default_cache_path())
         self.gpu, self.gpu_checked = None, False
         threading.Thread(target=self._detect_gpu, daemon=True).start()
@@ -316,10 +321,11 @@ class Api:
 
     @_locked
     def _measure_missing(self):
+        copied = {path for path, r in self._recipes().items() if r.copy_video}
         for f in self.project.films:
             path, m = f["file"], self.meta.get(f["file"]) or {}
-            if path not in self._media or "error" in m:
-                continue
+            if path not in self._media or "error" in m or path in copied:
+                continue                     # a copied film's size is already known exactly
             crf, preset, _ = self._profile(m)
             key = f"{crf}/{preset}"
             if key in (m.get("rates") or {}) or key in m.get("failed", []):
@@ -384,7 +390,7 @@ class Api:
         else:
             self.project.set(key, value)
         self._changed()
-        if key in ("save_space", "speed"):
+        if key in ("save_space", "speed", "keep_streams", "disc_size", "audio_tracks"):
             self._measure_missing()
         return self.state()
 
@@ -415,6 +421,19 @@ class Api:
         self.push({"type": "themes"})
         self.push({"type": "toast", "message": f"Removed {name}"})
         return self.state()
+
+    def _check_update(self):
+        found = updates.check()
+        if found:
+            self.update = found
+            self.push({"type": "update"})
+
+    def open_update(self):
+        """Open the newer release's page in the browser."""
+        import webbrowser
+        if self.update:
+            webbrowser.open(self.update["url"])
+        return {"ok": True}
 
     def _trust_folder(self, folder):
         folders = self.settings.setdefault("trusted_theme_folders", [])
@@ -449,24 +468,51 @@ class Api:
         return st
 
     # ------------------------------------------------------------------ state
+    def _track_settings(self):
+        """The project's settings as the track recipes read them."""
+        d = self.project.data
+        return types.SimpleNamespace(audio_kbps=int(d.get("audio_kbps", 448)), audio_tracks=d.get("audio_tracks"),
+                                     subtitles=d.get("subtitles"), keep_streams=bool(d.get("keep_streams")))
+
+    def _known(self):
+        """(path, facts, Media) for every film that has been read."""
+        return [(f["file"], self.meta[f["file"]], self._media[f["file"]]) for f in self.project.films
+                if (self.meta.get(f["file"]) or {}).get("duration") and f["file"] in self._media]
+
+    @_locked
+    def _recipes(self) -> dict:
+        """How each film that has been read will go on the disc (tracks.Recipe), by path."""
+        known = self._known()
+        if not known:
+            return {}
+        st = self._track_settings()
+        planned = [tracks.planned_audio_kbps(st, md) for _, _, md in known]
+        limit = budget.video_limit(self.project.data["disc_size"], [m["duration"] for _, m, _ in known],
+                                   st.audio_kbps, planned)
+        return {path: tracks.recipe(st, md, limit) for path, _, md in known}
+
     def _plan(self, speed: str | None = None):
-        films = [(f["file"], self.meta.get(f["file"]) or {}) for f in self.project.films]
-        known = [(path, m) for path, m in films if m.get("duration")]
+        known = self._known()
         if not known:
             return None
-        needs = [self._need(m, speed) for _, m in known]
-        audio = int(self.project.data.get("audio_kbps", 448))
-        p = budget.plan(self.project.data["disc_size"], [m["duration"] for _, m in known], audio,
+        st = self._track_settings()
+        recipes = self._recipes()
+        needs = [([md.video_kbps], True) if recipes[path].copy_video else self._need(m, speed)
+                 for path, m, md in known]
+        p = budget.plan(self.project.data["disc_size"], [m["duration"] for _, m, _ in known], st.audio_kbps,
                         [r for r, _ in needs],
-                        # stereo films get 192 kbps audio on the disc, 5.1 films the project's rate
-                        [audio if (m.get("channels") or 6) >= 6 else 192 for _, m in known])
+                        [recipes[path].audio_kbps for path, _, _ in known],
+                        [tracks.planned_audio_kbps(st, md) for _, _, md in known])
         return {"video_kbps": p.video_kbps, "estimated_bytes": p.estimated_bytes, "capacity": p.capacity,
-                "warning": p.warning, "complete": len(known) == len(films), "total_seconds": p.total_seconds,
+                "warning": p.warning, "complete": len(known) == len(self.project.films),
+                "total_seconds": p.total_seconds,
                 "reserve": budget.MENU_RESERVE, "overhead": budget.MUX_OVERHEAD,
                 "audio_kbps": p.audio_kbps, "limited": p.limited,
-                "films": {path: {"bytes": b, "measured": st} for (path, _), b, (_, st) in zip(known, p.film_bytes, needs)},
-                "measuring": sum(1 for _, st in needs if st is False),
-                "exact": all(st for _, st in needs),
+                "films": {path: {"bytes": b, "measured": state, "copy": recipes[path].copy_video,
+                                 "audio": len(recipes[path].audio) or 1, "subs": len(recipes[path].subs)}
+                          for (path, _, _), b, (_, state) in zip(known, p.film_bytes, needs)},
+                "measuring": sum(1 for _, state in needs if state is False),
+                "exact": all(state for _, state in needs),
                 "save_space": bool(self.project.data.get("save_space")),
                 "speed": speed or self.project.data.get("speed", "quality")}
 
@@ -510,6 +556,8 @@ class Api:
             "gpu_checked": self.gpu_checked,
             "speed_sizes": self._speed_sizes(),
             "burners": self._burner_state(),
+            "version": __version__,
+            "update": self.update,
         }
 
     @staticmethod

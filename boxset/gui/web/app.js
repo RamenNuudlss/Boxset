@@ -300,9 +300,41 @@ function filmDetail(f, i, m) {
     <div class="field"><label class="switch"><input type="checkbox" data-field="spinoff" ${f.spinoff ? "checked" : ""}><span class="track"></span><span>Mark as a spin-off</span></label></div>
     ${extra.map((x) => `<div class="field"><label for="x${i}${esc(x.key)}">${esc(x.label)}</label><input id="x${i}${esc(x.key)}" class="text-input" data-field="x_${esc(x.key)}" value="${esc(f[x.key] || "")}"></div>`).join("")}
     ${probs.length ? `<div class="full">${probs.map((p) => `<div class="problem ${m.error ? "err" : ""}">${esc(p)}</div>`).join("")}</div>` : ""}
-    <div class="full detail-actions"><span class="file-path">${esc(f.file)}${m && !m.error ? `<br>${m.width}×${m.height}, ${esc(m.fps)} fps, ${gb(m.size)} GB` : ""}</span>
+    <div class="full detail-actions"><span class="file-path">${esc(f.file)}${m && !m.error ? `<br>${m.width}×${m.height}, ${esc(m.fps)} fps, ${gb(m.size)} GB${onDisc(f, m)}` : ""}</span>
     <button class="btn small danger" data-remove="${i}">Remove from disc</button></div>
   </div>`;
+}
+
+// what of a film goes on the disc, in a few words
+function onDisc(f, m) {
+  const p = S.plan && S.plan.films && S.plan.films[f.file];
+  const bits = [];
+  if (p && p.copy) bits.push("picture copied without re-encoding");
+  if (m.hdr === "hdr10" || m.hdr === "hlg") bits.push("HDR converted to SDR");
+  if (p) {
+    bits.push(p.audio === 1 ? (m.audio_tracks > 1 ? `1 of ${m.audio_tracks} audio tracks` : "1 audio track") : `${p.audio} audio tracks`);
+    if (p.subs) bits.push(p.subs === 1 ? "1 subtitle track" : `${p.subs} subtitle tracks`);
+    else if (m.subtitles && S.project.subtitles !== "all") bits.push("subtitles off");
+  }
+  return bits.length ? `<br>On the disc: ${esc(bits.join(", "))}` : "";
+}
+
+function tracksControl() {
+  const p = S.project;
+  const sw = (key, on, label, help) => `<div class="save-space">
+      <label class="switch"><input type="checkbox" data-set="${key}" ${on ? "checked" : ""}><span class="track"></span><span>${label}</span></label>
+      <p>${help}</p></div>`;
+  return sw("audio_tracks", p.audio_tracks === "all", "Every audio track",
+            "Keep each film's other languages and commentaries, chosen with the remote's Audio button. Off: only the first track.")
+    + sw("subtitles", p.subtitles === "all", "Subtitles",
+         "Put each film's subtitles on the disc, off until chosen with the remote's Subtitle button. Text subtitles (in the file, or an .srt beside it) are drawn in a plain white font.")
+    + sw("keep_streams", !!p.keep_streams, "Copy what's already Blu-ray",
+         "Films whose picture or sound came straight off a Blu-ray are copied, not encoded again: no quality lost and far quicker. Everything else is encoded as usual.");
+}
+
+function updateNote() {
+  return S.update ? `<div class="note update-note"><span>Boxset ${esc(S.update.version)} is out. You have ${esc(S.version)}.</span>
+    <button class="btn small" data-do="get-update">See what's new</button></div>` : "";
 }
 
 function discPane() {
@@ -317,7 +349,7 @@ function discPane() {
   let [qWord, qFrac] = !plan ? ["", 0] : plan.limited < 0.1 ? (save ? [SAVE_SPACE_QUALITY, .86] : ["Same as your files", 1]) : quality(plan.video_kbps);
   if (plan && save && plan.limited >= 0.1) qFrac = Math.min(qFrac, .86);
   const measuring = plan ? plan.measuring : 0;
-  return `<div class="disc-figure">${discSvg({ segments: segs, capacity: cap, reserve: plan ? plan.reserve : 0, highlight: hot })}</div>
+  return `${updateNote()}<div class="disc-figure">${discSvg({ segments: segs, capacity: cap, reserve: plan ? plan.reserve : 0, highlight: hot })}</div>
     <div class="capacity-line"><div class="capacity-big ${over ? "over" : ""}">${plan ? gb(used) : "0.0"}<small>of ${gb(cap)} GB</small></div>
       <div class="capacity-free">${plan ? (over ? `${gb(used - cap)} GB too much` : `${gb(cap - used)} GB free`) : "Add films to see the fit"}</div></div>
     ${measuring ? `<div class="capacity-hint"><span class="spin" aria-hidden="true"></span>Measuring ${measuring === 1 ? "1 film" : measuring + " films"} for an accurate size</div>` : ""}
@@ -327,13 +359,14 @@ function discPane() {
       <label class="switch"><input type="checkbox" data-save-space ${save ? "checked" : ""}><span class="track"></span><span>Save space</span></label>
       <p>${SAVE_SPACE_HELP}</p>
     </div>
+    ${tracksControl()}
     ${plan ? `<dl class="facts">
       <dt>Video limit per film</dt><dd>${(plan.video_kbps / 1000).toFixed(1)} Mbps</dd>
       <dt>Picture quality</dt><dd>${qWord}</dd>
       <div class="quality-meter"><i style="width:${(qFrac * 100).toFixed(0)}%"></i></div>
       <dt>Encoding speed</dt><dd>${plan.speed === "gpu" && S.gpu_checked && !S.gpu ? "Faster (no graphics card)" : (SPEEDS.find((x) => x.id === plan.speed) || SPEEDS[0]).label}</dd>
       <dt>Running time</dt><dd>${fmtLong(plan.total_seconds)}</dd>
-      <dt>Audio</dt><dd>Dolby Digital, ${plan.audio_kbps} kbps</dd>
+      <dt>Surround audio</dt><dd>Dolby Digital, ${plan.audio_kbps} kbps</dd>
     </dl>` : ""}
     ${plan && plan.warning ? `<div class="note warn">Only ${(plan.video_kbps / 1000).toFixed(1)} Mbps per film fits. ${S.project.disc_size !== "BD-100" ? "A bigger disc type would look noticeably better." : "Consider splitting the collection across two discs."}</div>` : ""}
     ${S.project.disc_size === "BD-100" && S.project.films.length ? `<div class="note">BD-100 discs need a player that supports BDXL. Most players from the last decade do; check yours before burning.</div>` : ""}
@@ -805,6 +838,7 @@ function onEvent(e) {
       break;
     case "gpu":
     case "burners":
+    case "update":
       call("state").then((st) => { S = st; renderSoon(); });
       break;
     case "themes":
@@ -876,6 +910,7 @@ async function doThing(what, el) {
       break;
     }
     case "trust-themes": await act("trust_project_themes"); break;
+    case "get-update": act("open_update"); break;
     case "open-disc": act("open_folder", "disc"); break;
     case "make-iso": await act("make_iso"); break;
     case "burn": act("burn"); break;
@@ -960,6 +995,9 @@ document.addEventListener("change", (ev) => {
   if (t.dataset.orderToggle) return editAct("set_option", t.dataset.orderToggle, t.checked ? S.project.films.map((_, k) => k + 1) : null);
   if (t.dataset.bopt) { buildOpts[t.dataset.bopt] = t.checked; saveOpts(); renderBuild(); }
   if (t.matches("[data-save-space]")) return act("set", "save_space", t.checked);
+  if (t.dataset.set === "audio_tracks") return act("set", "audio_tracks", t.checked ? "all" : "first");
+  if (t.dataset.set === "subtitles") return act("set", "subtitles", t.checked ? "all" : "off");
+  if (t.dataset.set === "keep_streams") return act("set", "keep_streams", t.checked);
   if (t.matches("[data-burner]")) return act("set_burner", t.value);
   if (t.matches("[data-auto-chapters]")) return editAct("set", "auto_chapters", +t.value);
 });

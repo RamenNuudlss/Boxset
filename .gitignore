@@ -6,3 +6,4 @@ testmedia/
 packaging/MicrosoftEdgeWebview2Setup.exe
 *.boxset.tmp
 .boxset-theme-try.json
+boxset/_version.py

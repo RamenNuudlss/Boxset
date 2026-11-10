@@ -16,16 +16,11 @@ import shutil
 import subprocess
 import threading
 import time
-from fractions import Fraction
 
-from . import budget, chapters, config, core, encoders, estimate, probe, thumbs, winfix
+from . import budget, chapters, config, core, encoders, estimate, probe, subs as submod, thumbs, tracks, winfix
 
-DISC_FPS = {
-    Fraction(24000, 1001): (24000, 1001),
-    Fraction(24, 1): (24000, 1001),
-    Fraction(25, 1): (25, 1),
-    Fraction(30000, 1001): (30000, 1001),
-}
+DISC_FPS = probe.DISC_FPS      # source frame rate -> the rate it has on the disc
+PROBE_CACHE_VERSION = 1        # bump when probe.Media gains something a cached entry would lack
 
 STAGES = ["check", "menus", "encode", "assemble", "iso"]
 
@@ -83,8 +78,7 @@ def load_media(coll, job: Job | None = None, refresh=False):
                 cache = json.load(fh)
         except (OSError, ValueError):
             cache = {}
-        if not isinstance(cache, dict):
-            cache = {}
+        cache = cache.get("files", {}) if isinstance(cache, dict) and cache.get("v") == PROBE_CACHE_VERSION else {}
     try:
         os.remove(os.path.join(coll.build, "probe3.cache"))     # the cache earlier versions wrote
     except OSError:
@@ -111,7 +105,7 @@ def load_media(coll, job: Job | None = None, refresh=False):
             problems.append((film.number, str(e)))
             continue
         fresh[key] = probe.to_dict(m)
-        minutes = getattr(coll, "auto_chapters", 0)
+        minutes = coll.auto_chapters
         if minutes and chapters.needs_chapters(m):
             m = dataclasses.replace(m, chapters=list(m.chapters))
             chapters.add_to(m, minutes, chapters.Cache(os.path.join(coll.build, "chapters.json")),
@@ -125,7 +119,7 @@ def load_media(coll, job: Job | None = None, refresh=False):
     tmp = cache_p + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(fresh, fh)
+            json.dump({"v": PROBE_CACHE_VERSION, "files": fresh}, fh)
         os.replace(tmp, cache_p)
     except OSError:
         pass                             # the cache only saves time
@@ -141,6 +135,8 @@ def describe(m) -> dict:
     a = m.audio[0] if m.audio else None
     return {"duration": m.duration, "chapters": len(m.chapters), "fps": m.fps_label,
             "channels": a.channels if a else 2,
+            "audio_tracks": len(m.audio), "subtitles": len(submod.usable(m)), "hdr": m.hdr,
+            "bd_video": m.bd_video,
             "width": m.width, "height": m.height, "size": os.path.getsize(m.path),
             "audio": f"{a.codec.upper()} {a.channels}ch" if a else "No audio",
             "problems": m.problems, **({"error": m.fatal[0][0].upper() + m.fatal[0][1:]} if m.fatal else {})}
@@ -238,11 +234,30 @@ def audio_for(coll, media):
     return channels, bitrate, lang
 
 
-def _clip_settings(coll, media, plan, enc):
+def _clip_settings(coll, media, plan, enc, recipe=None):
+    """Everything an encoded film depends on. A film is encoded again only when
+    this changes. What was added later (more tracks, subtitles, slowing, HDR
+    conversion, copying) only appears when it applies, so films encoded by
+    earlier versions still count as done."""
     st = os.stat(media.path)
-    return {"source": media.path, "size": st.st_size, "mtime": int(st.st_mtime),
-            "video_kbps": plan.video_kbps, "audio": list(audio_for(coll, media)[:2]),
-            "enc": enc, "chapters": media.chapters, "v": 2}
+    d = {"source": media.path, "size": st.st_size, "mtime": int(st.st_mtime),
+         "video_kbps": plan.video_kbps, "audio": list(audio_for(coll, media)[:2]),
+         "enc": enc, "chapters": media.chapters, "v": 2}
+    if recipe is None:
+        return d
+    if recipe.copy_video:
+        d["video_kbps"] = 0            # a copy doesn't depend on the disc's limit
+    if len(recipe.audio) > 1 or any(a.codec != "ac3" for a in recipe.audio):
+        d["tracks"] = [[a.stream, a.codec, 6 if a.channels > 2 else 2] for a in recipe.audio]
+    if recipe.subs:
+        d["subs"] = [[s.kind, s.index, s.language, os.path.basename(s.file),
+                      int(os.path.getmtime(s.file)) if s.file and os.path.exists(s.file) else 0]
+                     for s in recipe.subs]
+    if recipe.tempo != 1.0:
+        d["tempo"] = round(recipe.tempo, 6)
+    if recipe.tonemap:
+        d["tonemap"] = recipe.tonemap
+    return d
 
 
 def _legacy_settings(have: dict) -> dict:
@@ -257,12 +272,16 @@ def _legacy_settings(have: dict) -> dict:
     return have
 
 
-def choose_encoder(coll, film, media, plan, fast, job: Job | None = None, gpu=None, sizes=None) -> dict:
-    """How one film will be encoded, from the build's speed and quality settings."""
+def choose_encoder(coll, film, media, plan, fast, job: Job | None = None, gpu=None, sizes=None,
+                   recipe=None) -> dict:
+    """How one film's picture gets onto the disc: copied when the recipe says it
+    can be, else encoded as the build's speed and quality settings say."""
+    if recipe is not None and recipe.copy_video:
+        return {"encoder": "copy"}
     if fast:
         return {"encoder": "x264", "preset": "ultrafast", "crf": encoders.CRF_TEST_BUILD}
-    crf = encoders.crf_for(getattr(coll, "save_space", False))
-    speed = getattr(coll, "speed", "quality")
+    crf = encoders.crf_for(coll.save_space)
+    speed = coll.speed
     if encoders.uses_gpu(speed, gpu, DISC_FPS[media.fps]):
         sizes = sizes or estimate.Cache(estimate.default_cache_path())
         rates = sizes.get(media.path, crf)
@@ -279,35 +298,115 @@ def choose_encoder(coll, film, media, plan, fast, job: Job | None = None, gpu=No
     return {"encoder": "x264", "preset": encoders.x264_preset(speed), "crf": crf}
 
 
-def encode_film(job: Job, coll, film, media, plan, out, enc, on_progress):
-    """Encode one film to a Blu-ray clip with ffmpeg and the encoder `enc` names
-    (see choose_encoder), reporting progress and stoppable mid-way."""
-    from bdmvkit.encode import audio_args, fit_filter
-    from bdmvkit.formats import AUDIO_PID, PMT_PID, VIDEO_PID
-    fps = DISC_FPS.get(media.fps)
-    if fps is None:
-        raise RuntimeError(f"{film.title}: {float(media.fps):.3f} fps can't go on a Blu-ray")
-    ffmpeg = probe.need("ffmpeg")
-    channels, bitrate, _ = audio_for(coll, media)
+def prepare_subs(job: Job, film, media, recipe, workdir: str) -> list[tuple]:
+    """The film's subtitle tracks ready for muxing: ("pgs", stream index, language)
+    for picture subtitles copied from the file, ("sup", file, language) for text
+    drawn here. Tracks that can't be made are left out, with a note."""
+    out = []
+    for n, sub in enumerate(recipe.subs):
+        job.check()
+        if sub.kind == "pgs":
+            out.append(("pgs", sub.index, sub.language))
+            continue
+        name = sub.language if sub.language != "und" else f"track {n + 1}"
+        try:
+            cues = submod.read_cues(media.path, sub)
+            if not cues:
+                continue
+            if not submod.drawable(cues):
+                job.log(f"{film.title}: the {name} subtitles are in a script Boxset can't draw yet, "
+                        "so they're left out.", "warn")
+                continue
+            os.makedirs(workdir, exist_ok=True)
+            path = os.path.join(workdir, f"sub{n:02d}.sup")
+            if submod.write_sup(cues, path, recipe.tempo, job.check):
+                out.append(("sup", path, sub.language))
+        except RuntimeError as e:
+            job.log(f"{film.title}: couldn't read the {name} subtitles ({str(e).splitlines()[-1][:120]}), "
+                    "so they're left out.", "warn")
+    return out
+
+
+def encode_command(ffmpeg: str, media, recipe, enc: dict, max_kbps: int, out: str, sub_inputs=()) -> list[str]:
+    """The FFmpeg command that turns one film into its Blu-ray clip: picture
+    (copied, or fitted and encoded as `enc` says), then the sound tracks, then the
+    subtitle tracks, each with the stream number the disc's playlists expect."""
+    from bdmvkit.encode import audio_args
+    from bdmvkit.formats import AUDIO_PID, PG_PID, PMT_PID, VIDEO_PID
     cmd = [ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-y", "-progress", "pipe:1", "-nostats",
            "-i", media.path]
-    graph = [f"[0:v:0]{fit_filter(fps)}[v]"]
-    if media.audio:
-        graph.append("[0:a:0]apad[a0]")
-        amap = ["-map", "[a0]"]
+    inputs = 1
+    graph, maps, codecs = [], [], []
+    disc_seconds = media.duration * recipe.tempo
+    if recipe.copy_video:
+        maps += ["-map", "0:v:0"]
+        codecs += ["-c:v", "copy"]
     else:
+        graph.append(f"[0:v:0]{tracks.video_filter(recipe.fps, recipe.tempo, recipe.tonemap)}[v]")
+        maps += ["-map", "[v]"]
+        keys = [t * recipe.tempo for t in media.chapters if t > 0]
+        if enc["encoder"] == "x264":
+            codecs += encoders.x264_args(recipe.fps, max_kbps * 1000, keys, enc["preset"], enc["crf"])
+        else:
+            codecs += encoders.gpu_args(enc["encoder"], recipe.fps, max_kbps * 1000, enc["kbps"] * 1000, keys)
+    if not recipe.audio:                  # a film without sound gets a silent track
         cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
-        amap = ["-map", "1:a:0"]
-    cmd += ["-filter_complex", ";".join(graph), "-map", "[v]"] + amap
-    keys = [t for t in media.chapters if t > 0]
-    if enc["encoder"] == "x264":
-        cmd += encoders.x264_args(fps, plan.video_kbps * 1000, keys, enc["preset"], enc["crf"])
-    else:
-        cmd += encoders.gpu_args(enc["encoder"], fps, plan.video_kbps * 1000, enc["kbps"] * 1000, keys)
-    cmd += audio_args("ac3", channels, 0, bitrate)
-    cmd += ["-streamid", f"0:{VIDEO_PID}", "-streamid", f"1:{AUDIO_PID}",
-            "-t", f"{media.duration:.3f}", "-f", "mpegts", "-mpegts_m2ts_mode", "1",
+        maps += ["-map", f"{inputs}:a:0"]
+        inputs += 1
+        codecs += audio_args("ac3", 2, 0, tracks.STEREO_KBPS * 1000)
+    for k, a in enumerate(recipe.audio):
+        if a.copy:
+            maps += ["-map", f"0:a:{a.stream}"]
+            codecs += [f"-c:a:{k}", "copy"]
+            if a.codec == "dts":          # the core every player decodes, without the HD extension
+                codecs += [f"-bsf:a:{k}", "dca_core"]
+        else:
+            graph.append(f"[0:a:{a.stream}]{tracks.audio_filter(recipe.tempo)}[a{k}]")
+            maps += ["-map", f"[a{k}]"]
+            codecs += audio_args("ac3", a.channels, k, a.kbps * 1000)
+    for kind, what, _ in sub_inputs:
+        if kind == "pgs" and recipe.tempo == 1.0:
+            maps += ["-map", f"0:s:{what}"]
+            continue
+        if kind == "pgs":                 # the same file again, its times stretched with the film
+            cmd += ["-itsscale", f"{recipe.tempo:.6f}", "-i", media.path]
+            maps += ["-map", f"{inputs}:s:{what}"]
+        else:
+            cmd += ["-f", "sup", "-i", what]
+            maps += ["-map", f"{inputs}:s:0"]
+        inputs += 1
+    if graph:
+        cmd += ["-filter_complex", ";".join(graph)]
+    cmd += maps + codecs
+    if sub_inputs:
+        cmd += ["-c:s", "copy"]
+    n_audio = max(1, len(recipe.audio))
+    cmd += ["-streamid", f"0:{VIDEO_PID}"]
+    for k in range(n_audio):
+        cmd += ["-streamid", f"{1 + k}:{AUDIO_PID + k}"]
+    for k in range(len(sub_inputs)):
+        cmd += ["-streamid", f"{1 + n_audio + k}:{PG_PID + k}"]
+    cmd += ["-t", f"{disc_seconds:.3f}", "-f", "mpegts", "-mpegts_m2ts_mode", "1",
             "-mpegts_pmt_start_pid", str(PMT_PID), out]
+    return cmd
+
+
+def made_tracks(recipe, sub_inputs=()) -> dict:
+    """What a clip holds, as the disc's playlists need it told."""
+    audio = [[a.codec, a.channels, a.language] for a in recipe.audio] or [["ac3", 2, "und"]]
+    return {"audio": audio, "subs": [lang for _, _, lang in sub_inputs]}
+
+
+def encode_film(job: Job, coll, film, media, plan, out, enc, on_progress, recipe=None, sub_inputs=()):
+    """Make one film's Blu-ray clip with FFmpeg (see encode_command), reporting
+    progress and stoppable mid-way."""
+    if media.fps not in DISC_FPS:
+        raise RuntimeError(f"{film.title}: {float(media.fps):.3f} fps can't go on a Blu-ray")
+    if recipe is None:
+        recipe = tracks.recipe(coll, media, plan.video_kbps)
+    ffmpeg = probe.need("ffmpeg")
+    cmd = encode_command(ffmpeg, media, recipe, enc, plan.video_kbps, out, sub_inputs)
+    disc_seconds = media.duration * recipe.tempo
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                             encoding="utf-8", errors="replace", creationflags=flags)
@@ -323,10 +422,10 @@ def encode_film(job: Job, coll, film, media, plan, out, enc, on_progress):
             k, _, v = line.strip().partition("=")
             if k == "out_time_us" and v.isdigit():
                 pos = int(v) / 1e6
-                pct = min(0.999, pos / media.duration) if media.duration else 0
+                pct = min(0.999, pos / disc_seconds) if disc_seconds else 0
                 el = time.time() - started
                 speed = pos / el if el > 0 else 0
-                eta = (media.duration - pos) / speed if speed > 0 else None
+                eta = (disc_seconds - pos) / speed if speed > 0 else None
                 on_progress(pct, eta, speed)
         proc.wait()
     finally:
@@ -365,27 +464,33 @@ def _tidy_clips(coll, media):
                 pass
 
 
-def encode_all(coll, media, job: Job, plan, fast=False) -> dict[int, str]:
+def film_recipes(coll, media, plan) -> dict:
+    return {f.number: tracks.recipe(coll, media[f.number], plan.video_kbps) for f in coll.films}
+
+
+def encode_all(coll, media, job: Job, plan, fast=False, recipes=None) -> dict[int, str]:
+    recipes = recipes or film_recipes(coll, media, plan)
     clips_dir = os.path.join(coll.build, "clips")
     os.makedirs(clips_dir, exist_ok=True)
     total = sum(media[f.number].duration for f in coll.films)
     gpu = None
-    if not fast and getattr(coll, "speed", "quality") == "gpu":
+    if not fast and coll.speed == "gpu":
         gpu = encoders.detect_gpu()
         if gpu:
             job.log(f"Encoding with the graphics card: {gpu['name']}")
         else:
             job.log("No graphics card encoder works on this PC, so films are encoded with Faster instead.", "warn")
         if gpu and any(DISC_FPS[media[f.number].fps] != encoders.FILM_FPS for f in coll.films):
-            job.log("Films at 25 or 29.97 fps are encoded with Faster: the graphics card can't make the "
-                    "1080i video Blu-ray needs at those rates.", "warn")
+            job.log("Films that go on the disc at 25 or 29.97 fps are encoded with Faster: the graphics "
+                    "card can't make the 1080i video Blu-ray needs at those rates.", "warn")
     sizes = estimate.Cache(estimate.default_cache_path())
     todo, clips = [], {}
     for film in coll.films:
         clip = clip_path(coll, media[film.number])
         clips[film.number] = clip
-        enc = choose_encoder(coll, film, media[film.number], plan, fast, job, gpu, sizes)
-        want = _clip_settings(coll, media[film.number], plan, enc)
+        recipe = recipes[film.number]
+        enc = choose_encoder(coll, film, media[film.number], plan, fast, job, gpu, sizes, recipe)
+        want = _clip_settings(coll, media[film.number], plan, enc, recipe)
         meta = clip + ".json"
         have = None
         if os.path.exists(clip) and os.path.exists(meta):
@@ -395,6 +500,7 @@ def encode_all(coll, media, job: Job, plan, fast=False) -> dict[int, str]:
             except ValueError:
                 have = None
         if have is not None:
+            have.pop("made", None)           # what the clip holds, not what it depends on
             have = _legacy_settings(have)
         if have != want:
             todo.append((film, clip, meta, want))
@@ -406,28 +512,41 @@ def encode_all(coll, media, job: Job, plan, fast=False) -> dict[int, str]:
     for film, clip, meta, want in todo:
         job.check()
         m = media[film.number]
+        recipe = recipes[film.number]
         part = clip + ".part"
         job.emit({"type": "film", "film": film.number, "status": "encoding", "title": film.title})
         base = done_secs
+        if recipe.copy_video:
+            job.log(f"{film.title}: the picture is already Blu-ray video, so it's copied as it is.")
+        if m.hdr in ("hdr10", "hlg") and not recipe.tonemap:
+            job.log(f"{film.title} is HDR, and this FFmpeg can't convert it (it lacks the zscale filter), "
+                    "so its colours will look washed out.", "warn")
+        if coll.subtitles == "all":
+            for note in submod.skipped(m):
+                job.log(f"{film.title}: left out {note}.", "warn")
+        subdir = clip + ".subs"
+        sub_inputs = prepare_subs(job, film, m, recipe, subdir)
 
         def prog(pct, eta, speed, film=film, m=m, base=base):
             job.emit({"type": "progress", "stage": "encode", "film": film.number, "pct": pct,
                       "eta": eta, "speed": round(speed, 2), "overall": (base + pct * m.duration) / total})
         try:
-            encode_film(job, coll, film, m, plan, part, want["enc"], prog)
+            encode_film(job, coll, film, m, plan, part, want["enc"], prog, recipe, sub_inputs)
         except RuntimeError as e:
-            if want["enc"]["encoder"] == "x264":
+            if want["enc"]["encoder"] in ("x264", "copy"):
                 raise
             # the card failed (driver, memory, an unusual source): do this film on the processor
             first = next((ln for ln in str(e).splitlines()[1:] if ln.strip()), str(e))[:160]
             job.log(f"The graphics card couldn't encode {film.title} ({first}). Encoding it with Faster instead.",
                     "warn")
             want = dict(want, enc={"encoder": "x264", "preset": encoders.x264_preset("fast"),
-                                   "crf": encoders.crf_for(getattr(coll, "save_space", False))})
-            encode_film(job, coll, film, m, plan, part, want["enc"], prog)
+                                   "crf": encoders.crf_for(coll.save_space)})
+            encode_film(job, coll, film, m, plan, part, want["enc"], prog, recipe, sub_inputs)
+        finally:
+            shutil.rmtree(subdir, ignore_errors=True)
         os.replace(part, clip)
         with open(meta, "w", encoding="utf-8") as fh:
-            json.dump(want, fh)
+            json.dump(dict(want, made=made_tracks(recipe, sub_inputs)), fh)
         done_secs += m.duration
         job.emit({"type": "film", "film": film.number, "status": "done", "title": film.title,
                   "bytes": os.path.getsize(clip)})
@@ -446,6 +565,20 @@ def _stage_link(src, dst):
         shutil.copyfile(src, dst)
 
 
+def _made(coll, media, clip: str) -> dict:
+    """The sound and subtitle tracks in an encoded film, from the note saved
+    beside it; films encoded by earlier versions hold one Dolby Digital track."""
+    try:
+        with open(clip + ".json", encoding="utf-8") as fh:
+            made = json.load(fh).get("made")
+        if made and made.get("audio"):
+            return {"audio": made["audio"], "subs": made.get("subs") or []}
+    except (OSError, ValueError):
+        pass
+    channels, _, lang = audio_for(coll, media)
+    return {"audio": [["ac3", channels, lang]], "subs": []}
+
+
 def assemble(coll, media, manifest, clips, job: Job, fast=False) -> dict:
     from bdmvkit import Disc, MenuButton
     from bdmvkit.errors import BdmvError
@@ -462,9 +595,10 @@ def assemble(coll, media, manifest, clips, job: Job, fast=False) -> dict:
         m = media[film.number]
         staged = os.path.join(stage, f"film{film.number:02d}.m2ts")
         _stage_link(clips[film.number], staged)
-        channels, _, lang = audio_for(coll, m)
-        disc.add_title(staged, fps=DISC_FPS[m.fps], chapters=m.chapters,
-                       audio=[("ac3", channels, lang)], end=manifest["title_ends"][str(film.number)])
+        made = _made(coll, m, clips[film.number])
+        disc.add_title(staged, fps=DISC_FPS[m.fps], chapters=[round(t * m.tempo, 3) for t in m.chapters],
+                       audio=[tuple(a) for a in made["audio"]], subtitles=list(made["subs"]),
+                       end=manifest["title_ends"][str(film.number)])
     for pid, items in manifest["playlists"].items():
         disc.add_playlist(pid, items, end=manifest["playlist_ends"].get(pid, start))
     menu_fps = DISC_FPS[media[coll.films[0].number].fps]
@@ -494,11 +628,17 @@ def space_needed(coll, media, make_iso=False, sizes=None) -> int:
     """Roughly how many bytes of working space the build still needs in the build
     folder: the films not encoded yet, the menus, and the disc image if one is made.
     (The disc folder itself reuses the encoded films, so it adds almost nothing.)"""
-    crf = encoders.crf_for(getattr(coll, "save_space", False))
+    crf = encoders.crf_for(coll.save_space)
     sizes = sizes or estimate.Cache(estimate.default_cache_path())
     ms = [media[f.number] for f in coll.films]
-    needs = [sizes.get(m.path, crf) or estimate.guess(m, crf) for m in ms]
-    p = budget.plan(coll.disc_size, [m.duration for m in ms], coll.audio_kbps, needs)
+    durations = [m.duration for m in ms]
+    planned = [tracks.planned_audio_kbps(coll, m) for m in ms]
+    limit = budget.video_limit(coll.disc_size, durations, coll.audio_kbps, planned)
+    recipes = [tracks.recipe(coll, m, limit) for m in ms]
+    needs = [[m.video_kbps] if r.copy_video else sizes.get(m.path, crf) or estimate.guess(m, crf)
+             for m, r in zip(ms, recipes)]
+    p = budget.plan(coll.disc_size, durations, coll.audio_kbps, needs,
+                    [r.audio_kbps for r in recipes], planned)
     to_encode = sum(b for m, b in zip(ms, p.film_bytes) if not os.path.exists(clip_path(coll, m)))
     return to_encode + budget.MENU_RESERVE + (p.estimated_bytes if make_iso else 0)
 
@@ -536,7 +676,10 @@ def _run(collection_path: str, job: Job, menus_only=False, skip_encode=False, fa
     media, problems = load_media(coll, job)
     if problems:
         raise RuntimeError("\n".join(f"Film {n}: {msg}" for n, msg in problems))
-    plan = budget.plan(coll.disc_size, [media[f.number].duration for f in coll.films], coll.audio_kbps)
+    # the limit allows for each film's sound: more tracks leave a little less for the picture
+    plan = budget.plan(coll.disc_size, [media[f.number].duration for f in coll.films], coll.audio_kbps,
+                       film_audio=[tracks.planned_audio_kbps(coll, media[f.number]) for f in coll.films])
+    recipes = film_recipes(coll, media, plan)
     job.emit({"type": "plan", "video_kbps": plan.video_kbps, "estimated_bytes": plan.estimated_bytes,
               "capacity": plan.capacity, "warning": plan.warning})
     if plan.warning:
@@ -555,7 +698,7 @@ def _run(collection_path: str, job: Job, menus_only=False, skip_encode=False, fa
         if missing:
             raise RuntimeError("Not encoded yet: " + ", ".join(missing))
     else:
-        clips = encode_all(coll, media, job, plan, fast)
+        clips = encode_all(coll, media, job, plan, fast, recipes)
     job.check()
     result = assemble(coll, media, manifest, clips, job, fast)
     _tidy_clips(coll, media)

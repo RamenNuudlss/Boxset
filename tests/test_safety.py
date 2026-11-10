@@ -6,7 +6,6 @@ import http.client
 import json
 import os
 import threading
-from fractions import Fraction
 
 import pytest
 
@@ -15,19 +14,7 @@ from boxset.gui import server
 from boxset.project import Project
 
 
-@pytest.fixture(autouse=True)
-def _own_settings(tmp_path, monkeypatch):
-    """Keep settings, caches and installed themes away from the real user folder."""
-    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
-    yield
-    core.restrict_project_themes(None)
-
-
-def _media(path, **kw):
-    return probe.Media(path=str(path), duration=kw.pop("duration", 6000.0), fps=Fraction(24000, 1001),
-                       width=1920, height=1080, chapters=[0.0, 600.0],
-                       audio=[probe.AudioStream(1, "ac3", 6, "eng", 448.0)], vcodec="h264",
-                       video_kbps=8000.0, **kw)
+from conftest import make_media as _media
 
 
 class _Coll:
@@ -77,6 +64,7 @@ def test_command_line_is_not_restricted(tmp_path):
 def test_media_round_trips_through_json():
     m = _media("film.mkv", problems=["a warning"])
     again = probe.from_dict(json.loads(json.dumps(probe.to_dict(m))))
+    from fractions import Fraction
     assert again == m and isinstance(again.fps, Fraction)
 
 
@@ -105,15 +93,16 @@ def test_probe_cache_is_json_and_reused(tmp_path, monkeypatch):
     assert not problems and media[1].duration == 6000.0
     assert not os.path.exists(old)
     with open(os.path.join(C.build, "probe.json"), encoding="utf-8") as fh:
-        assert len(json.load(fh)) == 1
+        assert len(json.load(fh)["files"]) == 1
     media, _ = pipeline.load_media(C)
     assert len(calls) == 1 and media[1] == _media(film)
     # a cache from some other version is ignored, not trusted
     cache_p = os.path.join(C.build, "probe.json")
     with open(cache_p, encoding="utf-8") as fh:
-        keys = list(json.load(fh))
+        saved = json.load(fh)
+    saved["files"] = {k: {"nonsense": 1} for k in saved["files"]}
     with open(cache_p, "w", encoding="utf-8") as fh:
-        json.dump({k: {"nonsense": 1} for k in keys}, fh)
+        json.dump(saved, fh)
     pipeline.load_media(C)
     assert len(calls) == 2
 
@@ -177,6 +166,7 @@ def _space_case(tmp_path, monkeypatch, free_gb):
         build = str(tmp_path)
         films = [Film]
         disc_size, audio_kbps, save_space = "BD-25", 448, False
+        audio_tracks, subtitles, keep_streams = "first", "off", False
 
     class Usage:
         free = int(free_gb * 1e9)

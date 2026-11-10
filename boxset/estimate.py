@@ -76,9 +76,8 @@ def limited_share(rates: list[float], ceiling: float) -> float:
 def measure(media, cancel: threading.Event | None = None, crf: int = CRF_STANDARD,
             preset: str = "medium") -> list[float] | None:
     """Encode short samples with the disc's real settings; return their bitrates."""
-    from bdmvkit.encode import fit_filter
-    from .pipeline import DISC_FPS
-    fps = DISC_FPS.get(media.fps)
+    from . import tracks
+    fps = probe.DISC_FPS.get(media.fps)
     if fps is None or media.duration <= 0:
         return None
     ffmpeg = probe.need("ffmpeg")
@@ -87,12 +86,14 @@ def measure(media, cancel: threading.Event | None = None, crf: int = CRF_STANDAR
     # spread through the film, skipping the opening logos and end credits
     starts = [media.duration * (0.08 + 0.84 * (i + 0.5) / n) for i in range(n)]
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    hdr = media.hdr if media.hdr in ("hdr10", "hlg") and tracks.tonemap_available() else ""
+    vf = tracks.video_filter(fps, 1.0, hdr)         # measured as it will be encoded
     rates = []
     for t in starts:
         if cancel is not None and cancel.is_set():
             return None
         cmd = [ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-ss", f"{t:.2f}", "-i", media.path,
-               "-t", f"{length:.2f}", "-map", "0:v:0", "-vf", fit_filter(fps), "-an", "-sn"]
+               "-t", f"{length:.2f}", "-map", "0:v:0", "-vf", vf, "-an", "-sn"]
         cmd += x264_args(fps, UNLIMITED_KBPS * 1000, (), preset, crf)
         cmd += ["-f", "h264", "pipe:1"]
         proc = subprocess.run(cmd, capture_output=True, creationflags=flags)
