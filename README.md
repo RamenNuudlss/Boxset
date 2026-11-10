@@ -65,6 +65,10 @@ Blu-ray player, remote and all.
   are built in, and new ones install with a double-click.
 - **Click through the real menus first.** The menu preview is the actual rendered disc
   menu, driven with the arrow keys exactly as your remote will drive it.
+- **Languages and subtitles come along.** Every audio track and subtitle track of a film
+  goes on the disc, chosen with the remote's Audio and Subtitle buttons.
+- **Blu-ray rips aren't encoded twice.** A film whose picture came straight off a Blu-ray
+  is copied as it is: no quality lost, and done in minutes.
 - **One button to build.** Menus, encoding, the disc structure and a disc image, with
   live progress and a time estimate. Stop whenever you like; finished films are kept.
 - **Plays in standard players.** Menus use the standard Blu-ray menu system (HDMV), not
@@ -168,8 +172,8 @@ row means something needs attention:
 
 | Dot | Meaning | Examples |
 |---|---|---|
-| Amber | Boxset will handle it, but you should know | 24 fps is converted to 23.976 fps; a file with no audio gets silence |
-| Red | This file can't go on the disc as it is; the build is blocked until it's removed | an unsupported frame rate such as 30, 50 or 60 fps; a file that can't be read |
+| Amber | Boxset will handle it, but you should know | 24 fps plays 0.1% slower, at 23.976; HDR colour is converted to SDR; a file with no audio gets silence |
+| Red | This file can't go on the disc as it is; the build is blocked until it's removed | an unusual frame rate such as 15 or 48 fps; a file that can't be read |
 
 ### Disc space and picture quality
 
@@ -253,6 +257,29 @@ As a rule of thumb, this is how many hours of film fit at each limit:
 These are worst cases, for films that need the whole limit. The 11-film collection in
 the screenshots is 23 hours long: a limit of about 1.7 Mbps on a BD-25, 4.0 Mbps on a
 BD-50 and 8.5 Mbps on a BD-100.
+
+#### Audio tracks, subtitles and copying
+
+Three more switches sit under **Save space**. New projects start with all three on;
+projects made with earlier versions of Boxset keep them off until you turn them on, so
+opening one never re-encodes films you've already built.
+
+- **Every audio track.** Each film's other languages and commentaries go on the disc
+  (up to 8 per film), and the remote's **Audio** button switches between them. Off, only
+  the first track is included. Each extra track takes a little of the disc: about
+  0.15 GB per hour for stereo, 0.2 GB for 5.1.
+- **Subtitles.** Each film's subtitles go on the disc (up to 8 per film), off until you
+  choose one with the remote's **Subtitle** button. Boxset reads text subtitles inside
+  the file (SRT, ASS, MP4 text), subtitle files beside it with the same name
+  (`Fast Five (2011).en.srt`), and Blu-ray picture subtitles (PGS) made for 1080p. Text
+  is drawn in a plain white font with a black outline, at the bottom of the picture;
+  ASS styling and positions aren't kept.
+- **Copy what's already Blu-ray.** A film whose picture is already exactly what a Blu-ray
+  holds (typically an untouched Blu-ray rip, or "remux") is copied, not encoded again,
+  and its Dolby Digital and DTS sound is copied with it. DTS-HD keeps its DTS core, the
+  part every player can decode. Downloads and re-encodes look similar but almost never
+  qualify, and are encoded as usual. A film is only copied when it fits the disc's
+  per-film limit; open a film's details to see what will happen to it.
 
 ### 2. Menu
 
@@ -491,6 +518,11 @@ for you to delete yourself, since they're your files.
 > A theme pack contains program code that runs on your PC when menus are rendered.
 > Only install theme packs from people you trust.
 
+The same goes for themes in a project's own `themes` folder. The first time you open a
+project whose folder has one, the Menu tab lists those themes and asks before using
+them; nothing in the folder runs until you choose **Allow**. Projects you make in the app
+don't ask.
+
 ### Making your own
 
 Themes are written in Python, drawing screens either with code or as ordinary web pages
@@ -512,8 +544,10 @@ before anything is built. The full guide is in **[THEMES.md](THEMES.md)**.
   back to that film's page.
 - **Video** is H.264 High profile at level 4.1, the standard Blu-ray format, at
   1920 × 1080. Every chapter starts on a key frame, so chapter jumps are instant.
-- **Audio** is each film's first audio track as Dolby Digital: 5.1 at 448 kbps when the
-  source has 5.1 or more, otherwise stereo at 192 kbps.
+- **Audio** is Dolby Digital: 5.1 at 448 kbps when the source has 5.1 or more, otherwise
+  stereo at 192 kbps. Tracks that are already Dolby Digital are copied untouched. With
+  **Every audio track** on, each film carries all of its tracks.
+- **Subtitles** are standard Blu-ray picture subtitles (PGS), off until chosen.
 - **Menus** use HDMV interactive graphics, the menu system every Blu-ray player supports.
   Backgrounds can be still pictures or looping video, with optional music.
 
@@ -522,11 +556,11 @@ before anything is built. The full guide is in **[THEMES.md](THEMES.md)**.
 | | Supported | Notes |
 |---|---|---|
 | **File types** | MKV, MP4, M4V, MOV, AVI, M2TS, TS, WMV, WebM, VOB, MPG/MPEG | Anything FFmpeg can read, with one of the extensions on the left |
-| **Frame rates** | 23.976, 24, 25, 29.97 fps | 24 fps becomes 23.976 (an occasional frame is dropped). 25 and 29.97 fps are stored the way Blu-ray requires (as 1080i). 30, 50, 59.94 and 60 fps aren't supported |
+| **Frame rates** | 23.976, 24, 25, 29.97, 30, 50, 59.94, 60 fps | 24 and 30 fps play 0.1% slower (at 23.976 and 29.97) with every frame kept, the way films are put on disc. 25 and 29.97 fps are stored the way Blu-ray requires (as 1080i). 50, 59.94 and 60 fps keep every other frame, so fast motion is a little less smooth |
 | **Resolution** | Anything | Scaled to fit 1920 × 1080, with black bars to keep the shape |
-| **4K and HDR** | Scaled down to 1080p | HDR colour (HDR10, Dolby Vision) isn't converted and will look washed out. Use SDR (standard) versions of your films |
-| **Audio** | The first audio track | Other tracks (other languages, commentaries) aren't included |
-| **Subtitles** | Not yet | Subtitles in your files aren't carried onto the disc |
+| **4K and HDR** | Scaled down to 1080p | HDR10 and HLG colour is converted to standard (SDR). Dolby Vision files that also carry HDR10 (most do) convert the same way; Dolby Vision alone can't be converted, so use another version of those films |
+| **Audio** | Up to 8 tracks per film | Encoded to Dolby Digital unless already Dolby Digital (or, for copied films, DTS) |
+| **Subtitles** | Text (SRT, ASS, MP4 text, WebVTT) and 1080p Blu-ray picture subtitles (PGS), up to 8 per film | DVD picture subtitles (VobSub), 4K PGS, and text in scripts that need shaping (Arabic, Hebrew, Thai, Indic scripts) are left out, with a note in the build log. Forced subtitles aren't shown automatically |
 | **Chapters** | From the file | Files without chapters get a single chapter, and scene selection is skipped for them. Chapters closer than 5 seconds together are merged |
 | **Disc types** | BD-25, BD-50, BD-100 | Single-disc collections only |
 | **Films per disc** | Set by the theme | Tachometer 2–12, Marquee 1–11 |
@@ -587,6 +621,9 @@ Paths can be absolute or relative to the project file.
   "save_space": false,
   "speed": "quality",
   "auto_chapters": 5,
+  "audio_tracks": "all",
+  "subtitles": "all",
+  "keep_streams": true,
   "theme": "tachometer",
   "theme_options": {
     "title_small": "THE COMPLETE",
@@ -612,6 +649,9 @@ Paths can be absolute or relative to the project file.
 | `save_space` | `true` encodes films smaller, with some loss of fine detail (see [Save space](#save-space)). Default `false` |
 | `speed` | `quality` (default), `fast` or `gpu`; see [Build](#3-build) |
 | `auto_chapters` | Minutes between chapters added to films whose files have none; `0` adds none. Default `5` |
+| `audio_tracks` | `all` puts every audio track of each film on the disc; `first` only the first. Left out: `first` |
+| `subtitles` | `all` puts each film's subtitles on the disc; `off` none. Left out: `off` |
+| `keep_streams` | `true` copies picture and sound that are already what a Blu-ray holds, without re-encoding. Left out: `false` |
 | `theme` | The theme's folder name, as listed by `boxset-cli themes` |
 | `theme_options` | The theme's settings (see each theme). `timeline_order` lists film numbers in story order |
 | `build_dir` | Where build output goes, relative to the project file |
@@ -641,24 +681,30 @@ browser.
 <summary><strong>A film shows a red dot or "Can't use"</strong></summary>
 
 Open the film's details (the arrow at the end of its row) to see the reason. Usually it's
-a frame rate a Blu-ray can't hold (30, 50 or 60 fps), or a damaged or incomplete file.
-Convert the file to 23.976 or 29.97 fps with another tool, or remove it from the
+an unusual frame rate (Boxset takes 23.976, 24, 25, 29.97, 30, 50, 59.94 and 60 fps), or
+a damaged or incomplete file. Convert the file with another tool, or remove it from the
 project.
 </details>
 
 <details>
 <summary><strong>The picture looks washed out or grey</strong></summary>
 
-The source is HDR (often 4K releases). Boxset makes standard 1080p Blu-rays and doesn't
-convert HDR colour. Use the SDR version of the film.
+Boxset converts HDR10 and HLG colour to standard (SDR) as it encodes. Two cases it
+can't: a Dolby Vision file with no HDR10 layer (the film's details say so; use another
+version), and a build from source with an FFmpeg that lacks the `zscale` filter (the
+build log says so; the installer's FFmpeg has it). A film encoded by an earlier version
+of Boxset is re-encoded with the conversion the next time you build.
 </details>
 
 <details>
 <summary><strong>My subtitles or second audio track are missing</strong></summary>
 
-Boxset currently carries each film's first audio track only, and no subtitles. If the
-language you want isn't the first track, reorder the tracks in your file (for example
-with MKVToolNix) so it comes first.
+Turn on **Every audio track** and **Subtitles** on the Films tab; projects made before
+those switches existed start with them off. Then press the remote's **Audio** or
+**Subtitle** button during the film: subtitles are always off until chosen. If a
+subtitle track is still missing, the build log says why. DVD-style picture subtitles
+and a few scripts (see [Supported files and limits](#supported-files-and-limits)) can't
+be carried yet.
 </details>
 
 <details>
@@ -732,8 +778,11 @@ flowchart LR
 
 | Part | Job |
 |---|---|
-| `boxset/probe.py` | Reads each file with ffprobe: duration, frame rate, chapters, audio |
+| `boxset/probe.py` | Reads each file with ffprobe: duration, frame rate, chapters, audio, subtitles, HDR, and whether the picture is already Blu-ray video |
+| `boxset/settings.py` | A project's settings: defaults and checks, shared by the app and the build |
 | `boxset/budget.py` | Shares the disc between films |
+| `boxset/tracks.py` | Decides how each film goes on the disc: copied or encoded, which audio and subtitle tracks, frame rate, HDR conversion |
+| `boxset/subs.py` | Draws text subtitles as Blu-ray picture subtitles |
 | `boxset/core.py` | The theme interface: films and chapters in; menus, buttons, actions and playlists out. Also checks every menu against Blu-ray rules |
 | `boxset/html.py` | Renders HTML/CSS theme screens with Microsoft Edge (via Playwright): background, each button in three states, and looping video backgrounds |
 | `boxset/pipeline.py` | The build: read, plan, render, encode (with progress and cancelling), write the disc |
@@ -744,6 +793,11 @@ flowchart LR
 The app only listens on `127.0.0.1`, and every request must carry a random key created
 each time Boxset starts. Other programs and websites can't drive it or read your files
 through it.
+
+**Updates.** When it starts, the app asks GitHub once whether a newer release exists and,
+if so, shows a note with a link. Nothing is downloaded or installed, and nothing about
+you or your films is sent. To switch the check off, add `"check_updates": false` to
+`%APPDATA%\Boxset\settings.json`.
 
 ## Building from source
 
@@ -761,10 +815,19 @@ python -m boxset build "path/to/project.boxset" --fast
 You need Python 3.11 or newer and FFmpeg on `PATH`. HTML themes use Microsoft Edge or
 Chrome through Playwright. If neither is installed, run `playwright install chromium`.
 
+**Run the tests:**
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests
+```
+
+The tests that encode a few seconds of video are skipped when FFmpeg isn't installed.
+
 **Make the installer locally** (Windows):
 
 ```powershell
-pip install pyinstaller
+pip install -r requirements-dev.txt
 pyinstaller --noconfirm packaging/boxset.spec       # dist\Boxset\
 # put ffmpeg.exe and ffprobe.exe in dist\Boxset\bin\
 & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" packaging\installer.iss
@@ -774,8 +837,18 @@ pyinstaller --noconfirm packaging/boxset.spec       # dist\Boxset\
 push to `main` makes an installer you can download from the run's page, and publishing a
 release with a `v*` tag (for example `v0.1.0`) attaches `BoxsetSetup-0.1.0.exe` to it.
 The workflow packages the app with PyInstaller, bundles FFmpeg, fetches the WebView2
-installer, runs a quick check that the packaged app starts, and builds the installer with
-Inno Setup.
+installer, runs the tests and a quick check that the packaged app starts, and builds the
+installer with Inno Setup. Pull requests get the same run, without a release.
+
+Everything the build downloads is pinned: Python packages to exact versions in
+`requirements.txt`, FFmpeg to a version and checksum at the top of the workflow, GitHub
+Actions to exact commits. The WebView2 installer has no versioned address, so its
+Microsoft signature is checked instead. To update any of them, change the pin on purpose.
+
+**Code signing** is optional. Add two repository secrets, `WINDOWS_CERT_PFX` (your
+code-signing certificate as a base64-encoded `.pfx`) and `WINDOWS_CERT_PASSWORD`, and the
+workflow signs `Boxset.exe`, `boxset-cli.exe` and the installer. Without them the build
+is unsigned, as before.
 
 **Testing a disc's navigation:** `tests/libbluray_nav.py` opens a built disc with
 libbluray (the engine inside VLC, Kodi and mpv), presses remote buttons, and saves what
@@ -793,7 +866,7 @@ boxset/            the app and engine
   gui/             the app window: api.py, server.py, web/
   fonts/           fonts used by the built-in themes
 packaging/         PyInstaller spec, installer script, icon
-tests/             disc navigation test
+tests/             unit tests, short real encodes, and the disc navigation script
 docs/images/       screenshots for this page
 THEMES.md          writing themes
 ```

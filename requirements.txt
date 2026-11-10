@@ -1,4 +1,6 @@
-pillow>=10
-playwright>=1.40
-pywebview>=5.1
+# Exact versions, so every build of the installer is made from the same parts.
+# To update one: change it here, run the tests, and build.
+pillow==12.3.0
+playwright==1.63.0
+pywebview==6.2.1
 bdmvkit==0.7.0

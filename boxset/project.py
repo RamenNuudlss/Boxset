@@ -9,7 +9,7 @@ import json
 import os
 import re
 
-from .config import DISC_SIZES
+from . import settings
 
 VIDEO_EXTS = {".mkv", ".mp4", ".m4v", ".mov", ".avi", ".m2ts", ".ts", ".wmv", ".webm", ".vob", ".mpg", ".mpeg"}
 
@@ -46,27 +46,13 @@ def guess_title_year(path: str) -> tuple[str, int | None]:
     return name or os.path.basename(path), year
 
 
-DEFAULT = {
-    "theme": "tachometer",
-    "theme_options": {},
-    "disc_label": "MY_COLLECTION",
-    "disc_size": "BD-50",
-    "audio_kbps": 448,
-    "save_space": False,
-    "speed": "quality",
-    "auto_chapters": 5,
-    "timeline_order": None,
-    "build_dir": "build",
-    "films": [],
-}
+DEFAULT = settings.DEFAULT      # a new project's settings
 
 
 class Project:
     def __init__(self, path: str | None = None, data: dict | None = None):
         self.path = path
-        self.data = json.loads(json.dumps(data or DEFAULT))
-        for k, v in DEFAULT.items():
-            self.data.setdefault(k, json.loads(json.dumps(v)))
+        self.data = settings.fill(data or None)
 
     # -- files ------------------------------------------------------------------
     @classmethod
@@ -121,8 +107,8 @@ class Project:
                 if k == "year":
                     v = int(v) if str(v).strip().isdigit() else None
                 f[k] = v
-            elif k.startswith("x_"):          # theme-specific extra fields
-                f[k[2:]] = v
+            elif k.startswith("x_") and k[2:] not in allowed and k[2:] != "file":
+                f[k[2:]] = v                  # theme-specific extra fields, never the film's own
 
     def move_film(self, src: int, dst: int):
         f = self.films.pop(src)
@@ -135,19 +121,7 @@ class Project:
         self.data["timeline_order"] = None
 
     def set(self, key: str, value):
-        if key == "disc_size" and value not in DISC_SIZES:
-            raise ValueError(f"Unknown disc size {value}")
-        if key not in {"theme", "disc_label", "disc_size", "audio_kbps", "timeline_order", "build_dir", "save_space", "speed", "auto_chapters"}:
-            raise ValueError(f"Can't set {key}")
-        if key == "save_space":
-            value = bool(value)
-        if key == "auto_chapters":
-            value = int(value or 0)
-        if key == "speed" and value not in ("quality", "fast", "gpu"):
-            raise ValueError(f"Unknown speed {value}")
-        if key == "disc_label":
-            value = re.sub(r"[^A-Za-z0-9_ ]", "", str(value)).strip().replace(" ", "_").upper()[:32] or "COLLECTION"
-        self.data[key] = value
+        self.data[key] = settings.check(key, value)
 
     def set_option(self, key: str, value):
         self.data.setdefault("theme_options", {})[key] = value

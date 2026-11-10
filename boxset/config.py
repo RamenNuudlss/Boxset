@@ -5,12 +5,9 @@ import json
 import os
 from dataclasses import dataclass, field
 
-DISC_SIZES = {  # usable bytes per disc type
-    "BD-25": 25_025_314_816,
-    "BD-50": 50_050_629_632,
-    "BD-100": 100_103_356_416,
-}
+from . import settings
 
+DISC_SIZES = settings.DISC_SIZES     # usable bytes per disc type
 
 @dataclass
 class Film:
@@ -40,6 +37,11 @@ class Collection:
     save_space: bool = False
     speed: str = "quality"
     auto_chapters: int = 5       # minutes between added chapters for films with none (0 = off)
+    audio_tracks: str = "first"  # "all": every sound track of each film
+    subtitles: str = "off"       # "all": every subtitle track Boxset can carry
+    keep_streams: bool = False   # copy picture and sound that are already Blu-ray's
+    theme: str = "tachometer"
+    theme_options: dict = field(default_factory=dict)
     extra: dict = field(default_factory=dict)
 
     @property
@@ -72,6 +74,9 @@ def load(path: str) -> Collection:
     except json.JSONDecodeError as e:
         raise ConfigError(f"{path} isn't valid JSON (line {e.lineno}): {e.msg}")
 
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{path} isn't a Boxset project.")
+    raw = settings.fill(raw)
     films_raw = raw.get("films") or []
     if not films_raw:
         raise ConfigError("The project has no films yet.")
@@ -82,9 +87,20 @@ def load(path: str) -> Collection:
         films.append(Film(number=i, file=f["file"], title=f["title"], year=f.get("year"),
                           place=f.get("place", ""), spinoff=bool(f.get("spinoff", False))))
 
-    size = raw.get("disc_size", "BD-50").upper()
-    if size not in DISC_SIZES:
-        raise ConfigError(f"disc_size must be one of {', '.join(DISC_SIZES)} (got {size}).")
+    def setting(key, fallback=None):
+        """The project's value for a setting, checked; a bad one is an error
+        unless it has a harmless `fallback`."""
+        try:
+            return settings.check(key, raw[key])
+        except (ValueError, TypeError) as e:
+            if fallback is not None:
+                return fallback
+            raise ConfigError(f"{key}: {e}")
+
+    try:
+        size = settings.check("disc_size", raw["disc_size"])
+    except ValueError:
+        raise ConfigError(f"disc_size must be one of {', '.join(DISC_SIZES)} (got {raw['disc_size']}).")
 
     order = raw.get("timeline_order")
     if order is not None:
@@ -99,24 +115,26 @@ def load(path: str) -> Collection:
         if k in raw and k not in opts:
             opts[k] = raw[k]
 
-    c = Collection(
+    return Collection(
         path=path,
         title_small=opts.get("title_small", "THE COMPLETE"),
         title_big=opts.get("title_big", "COLLECTION"),
-        label=raw.get("disc_label", "COLLECTION")[:32],
+        label=str(raw.get("disc_label") or "COLLECTION")[:32],
         accent=opts.get("accent", "#FF6B1A"),
         disc_size=size,
-        audio_kbps=int(raw.get("audio_kbps", 448)),
-        save_space=bool(raw.get("save_space", False)),
-        speed=raw.get("speed", "quality") if raw.get("speed") in ("quality", "fast", "gpu") else "quality",
-        auto_chapters=int(raw.get("auto_chapters", 5) or 0),
+        audio_kbps=setting("audio_kbps"),
+        save_space=setting("save_space"),
+        speed=setting("speed", "quality"),
+        auto_chapters=setting("auto_chapters"),
+        audio_tracks=setting("audio_tracks", settings.LEGACY["audio_tracks"]),
+        subtitles=setting("subtitles", settings.LEGACY["subtitles"]),
+        keep_streams=setting("keep_streams"),
         audio_channels=int(raw.get("audio_channels", 6)),
         films=films,
         timeline_order=order,
         scene_selection=bool(opts.get("scene_selection", True)),
-        build_dir=raw.get("build_dir", "build"),
+        build_dir=raw.get("build_dir") or "build",
+        theme=raw.get("theme") or "tachometer",
+        theme_options=opts,
         extra=raw,
     )
-    c.theme = raw.get("theme", "tachometer")
-    c.theme_options = opts
-    return c

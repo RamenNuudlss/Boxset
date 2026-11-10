@@ -15,7 +15,7 @@ import argparse
 import sys
 import time
 
-from . import budget, config, core, encoders, estimate, pipeline, probe
+from . import budget, config, core, encoders, estimate, pipeline, probe, tracks
 from .config import ConfigError
 
 
@@ -61,7 +61,8 @@ def cmd_check(args):
         ms = [media[f.number] for f in coll.films]
         crf = encoders.crf_for(coll.save_space)
         say(budget.plan(coll.disc_size, [m.duration for m in ms], coll.audio_kbps,
-                        [sizes.get(m.path, crf) or estimate.guess(m, crf) for m in ms]).describe())
+                        [sizes.get(m.path, crf) or estimate.guess(m, crf) for m in ms],
+                        [tracks.planned_audio_kbps(coll, m) for m in ms]).describe())
         if coll.save_space:
             say("Save space is on: films are encoded smaller, with some loss of fine detail.")
     notes = [(f.number, p) for f in coll.films if f.number in media for p in media[f.number].problems]

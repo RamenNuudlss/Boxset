@@ -43,16 +43,34 @@ def film_size(duration: float, video: float, audio_kbps: int) -> int:
     return int((video + audio_kbps) * 1000 * duration / 8 * (1 + MUX_OVERHEAD))
 
 
+def video_limit(disc_size: str, durations: list[float], audio_kbps: int,
+                film_audio: list[int] | None = None) -> int:
+    """The most video bitrate (kbps) every film can have so the set fits the disc.
+    `audio_kbps` is held back for each film's sound; films whose tracks add up to
+    more (`film_audio`: several languages, copied tracks) take the rest out of it."""
+    total = sum(durations)
+    if total <= 0:
+        return MAX_VIDEO_KBPS
+    usable_bits = (DISC_SIZES[disc_size] - MENU_RESERVE) * 8 / (1 + MUX_OVERHEAD)
+    total_kbps = usable_bits / total / 1000
+    extra = 0.0
+    if film_audio:
+        extra = sum(d * max(0, a - audio_kbps) for d, a in zip(durations, film_audio)) / total
+    return int(min(MAX_VIDEO_KBPS, total_kbps - audio_kbps - extra) // 100 * 100)
+
+
 def plan(disc_size: str, durations: list[float], audio_kbps: int,
          needs: list[list[float] | None] | None = None,
-         film_audio: list[int] | None = None) -> Plan:
+         film_audio: list[int] | None = None,
+         limit_audio: list[int] | None = None) -> Plan:
     """`needs`: per film, the sample bitrates from estimate.guess/measure. Films
-    without one are counted at the full limit, the most they could take."""
+    without one are counted at the full limit, the most they could take.
+    `film_audio`: per film, what its sound tracks take on the disc (kbps).
+    `limit_audio`: the same figures as the video limit should see them, when they
+    differ (a copied film's sound is sized as copied but planned as encoded)."""
     cap = DISC_SIZES[disc_size]
     total = sum(durations)
-    usable_bits = (cap - MENU_RESERVE) * 8 / (1 + MUX_OVERHEAD)
-    total_kbps = usable_bits / total / 1000
-    video = int(min(MAX_VIDEO_KBPS, total_kbps - audio_kbps) // 100 * 100)
+    video = video_limit(disc_size, durations, audio_kbps, limit_audio or film_audio)
     warning = None
     if video < MIN_SANE_KBPS:
         bigger = [s for s in DISC_SIZES if DISC_SIZES[s] > cap]

@@ -21,8 +21,28 @@ mimetypes.add_type("text/javascript", ".js")
 PUBLIC_METHODS = {
     "state", "manifest", "recent", "new_project", "open_project", "save_project_as", "pick_files", "pick_folder",
     "add_paths", "cancel_render", "clear_menus", "remove_theme", "refresh_burners", "set_burner", "update_film", "move_film", "remove_film", "set", "set_option", "pick_option_file",
-    "install_theme", "render_menus", "build", "make_iso", "cancel", "open_folder", "burn",
+    "install_theme", "trust_project_themes", "open_update", "render_menus", "build", "make_iso", "cancel", "open_folder", "burn",
 }
+
+
+def _byte_range(header: str, size: int):
+    """(start, end) for a Range header on a file of `size` bytes. None if the header
+    isn't a single byte range we understand; False if it lies outside the file."""
+    if not header.startswith("bytes=") or "," in header:
+        return None
+    a, sep, b = header[6:].strip().partition("-")
+    a, b = a.strip(), b.strip()
+    if not sep or not (a or b) or not (a.isdigit() or not a) or not (b.isdigit() or not b):
+        return None
+    if not a:                                   # "-500": the last 500 bytes
+        if int(b) == 0 or size == 0:
+            return False
+        return max(0, size - int(b)), size - 1
+    start = int(a)
+    end = min(int(b), size - 1) if b else size - 1
+    if start >= size or end < start:
+        return False
+    return start, end
 
 
 def make_server(api, port: int = 0):
@@ -101,18 +121,23 @@ def make_server(api, port: int = 0):
 
         def _file(self, p):
             path = os.path.abspath(p)
-            roots = api.allowed_roots()
-            if not any(path.startswith(r + os.sep) for r in roots) or not os.path.isfile(path):
+            # compare the way the file system does (Windows ignores case in paths)
+            where = os.path.normcase(path)
+            roots = [os.path.normcase(r) for r in api.allowed_roots()]
+            if not any(where.startswith(r + os.sep) for r in roots) or not os.path.isfile(path):
                 return self._send(404, b"{}")
             size = os.path.getsize(path)
             ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
             rng = self.headers.get("Range")
             start, end = 0, size - 1
-            if rng and rng.startswith("bytes="):
-                a, _, b = rng[6:].partition("-")
-                start = int(a) if a else max(0, size - int(b))
-                end = int(b) if a and b else size - 1
-                end = min(end, size - 1)
+            if rng:
+                span = _byte_range(rng, size)
+                if span is None:          # a range we can't make sense of: send the whole file
+                    rng = None
+                elif span is False:       # a range past the end of the file
+                    return self._send(416, b"{}", extra={"Content-Range": f"bytes */{size}"})
+                else:
+                    start, end = span
             length = end - start + 1
             self.send_response(206 if rng else 200)
             self.send_header("Content-Type", ctype)

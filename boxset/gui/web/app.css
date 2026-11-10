@@ -274,6 +274,7 @@ main { height: calc(100% - var(--top-h)); }
 .theme-card .tname { font-weight: 620; font-stretch: 108%; padding: 0 2px; }
 .theme-card .tdesc { color: var(--text-2); font-size: 12.5px; padding: 0 2px 2px; line-height: 1.4; }
 .theme-card .tbadge { color: var(--text-3); font-size: 12px; padding: 0 2px; }
+.theme-trust { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .theme-foot { padding: 12px; border-top: 1px solid var(--line); }
 .theme-foot .btn { width: 100%; justify-content: center; }
 
@@ -392,6 +393,7 @@ details summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
 }
 
 .save-space { display: grid; gap: 6px; margin-top: -4px; }
+.update-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .save-space p { margin: 0 0 0 44px; color: var(--text-3); font-size: 12.5px; line-height: 1.45; }
 
 /* speed: a small rev gauge beside the choice */
