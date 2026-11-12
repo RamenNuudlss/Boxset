@@ -8,7 +8,10 @@ style: how far in you are, every chapter as a segment you can jump to, Resume
 and Menu.
 
 Drawn with HTML (the menus) and Pillow (the pop-up). All of the artwork is made
-here; the only pictures are frames from your own films.
+here; the pictures are frames from your own films, and, if you add them, your
+own posters and emblems: a poster per film (chosen in the settings, or a picture
+beside the film with the same name, or poster.jpg in its folder) and an emblem
+for each side of the title.
 """
 from __future__ import annotations
 
@@ -139,6 +142,28 @@ body { font-family: Cond, sans-serif; color: #e9f3f8; position: relative; }
   background: radial-gradient(circle at 35% 30%, #aebac4, #3a444d 60%, #12161a); }
 .door .seam { position: absolute; left: 12px; right: 12px; height: 3px; background: A_HEX;
   box-shadow: 0 0 16px 2px rgba(A_RGB, .8); animation: pulse 2s ease-in-out infinite; }
+
+/* ---- with a poster: the door is the poster ------------------------------------- */
+.door .poster { position: absolute; left: 12px; right: 12px; top: 12px; bottom: 12px; background-size: cover; background-position: top center;
+  clip-path: polygon(26px 0, calc(100% - 26px) 0, 100% 26px, 100% calc(100% - 26px), calc(100% - 26px) 100%, 26px 100%, 0 calc(100% - 26px), 0 26px); }
+.door .poster::after { content: ""; position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(5, 8, 11, .25) 0, transparent 12%, transparent 87%, rgba(5, 8, 11, .94) 95%),
+              linear-gradient(115deg, rgba(255, 255, 255, .10) 0, transparent 28%); }
+.door .strip { position: absolute; left: 30px; right: 30px; bottom: 22px; display: flex; align-items: baseline; gap: 16px;
+  font-family: Cond; font-size: 22px; letter-spacing: .2em; color: #b9c8d2; text-transform: uppercase; white-space: nowrap; }
+.door .strip b { font-family: Heavy; font-style: italic; font-size: 44px; letter-spacing: .02em; color: A_HEX; text-shadow: 0 0 16px rgba(A_RGB, .8); }
+.emblem { position: absolute; background-size: contain; background-repeat: no-repeat; background-position: center; }
+.emblem.l { filter: drop-shadow(0 0 3px rgba(255,255,255,.5)) drop-shadow(0 0 26px rgba(A_RGB, .85)) brightness(1.12); }
+.emblem.r { filter: drop-shadow(0 0 3px rgba(255,255,255,.5)) drop-shadow(0 0 26px rgba(B_RGB, .85)) brightness(1.12); }
+.emblem.ghost { opacity: .085; filter: grayscale(1) brightness(1.6); animation: pulse 4s ease-in-out infinite; }
+.one-sheet { position: absolute; }
+.one-sheet .shell { position: absolute; inset: 0; background: linear-gradient(180deg, #6a7682 0%, #2b333c 6%, #171c22 50%, #232a32 94%, #4b555f 100%);
+  clip-path: polygon(30px 0, 100% 0, 100% calc(100% - 30px), calc(100% - 30px) 100%, 0 100%, 0 30px);
+  }
+.one-sheet .art { position: absolute; inset: 12px; background-size: cover; background-position: top center;
+  clip-path: polygon(22px 0, 100% 0, 100% calc(100% - 22px), calc(100% - 22px) 100%, 0 100%, 0 22px); }
+.one-sheet .art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(115deg, rgba(255,255,255,.14) 0, transparent 30%); }
+.one-sheet .glow { position: absolute; inset: -30px; background: radial-gradient(closest-side, rgba(A_RGB, .30), transparent 78%); }
 
 /* ---- what the remote moves: brackets that lock onto a door ------------------- */
 .lock { position: absolute; }
@@ -313,7 +338,65 @@ class Theme(BaseTheme):
          "help": "Shown by the remote's Pop-up Menu button: time, chapters to jump to, Resume and Menu."},
         {"key": "main_music", "label": "Main menu music", "type": "file", "filter": "audio",
          "help": "Loops while the main menu is showing. MP3, WAV, FLAC or M4A."},
+        {"key": "emblem_left", "label": "Emblem, left of the title", "type": "file", "filter": "image",
+         "help": "Your own picture (PNG or JPG). A white background is removed."},
+        {"key": "emblem_right", "label": "Emblem, right of the title", "type": "file", "filter": "image"},
+        {"key": "poster1", "label": "Poster, film 1", "type": "file", "filter": "image",
+         "help": "Your own picture, upright (2:3). Left empty, Boxset looks beside the film for a picture "
+                 "with the film's name, or poster.jpg."},
+        {"key": "poster2", "label": "Poster, film 2", "type": "file", "filter": "image"},
+        {"key": "poster3", "label": "Poster, film 3", "type": "file", "filter": "image"},
+        {"key": "poster4", "label": "Poster, film 4", "type": "file", "filter": "image"},
+        {"key": "poster5", "label": "Poster, film 5", "type": "file", "filter": "image"},
     ]
+
+    # ------------------------------------------------------------------ the user's own pictures
+    def poster(self, f) -> str | None:
+        """Film f's poster: the one chosen in the settings, else a picture beside
+        the film (same name, name-poster, or poster / folder / cover)."""
+        chosen = self.options.get(f"poster{f.number}")
+        if chosen:
+            path = self.ctx.user_file(chosen)
+            if os.path.isfile(path):
+                return path
+            self.ctx.log(f"    poster for film {f.number} not found: {chosen}")
+        folder, name = os.path.split(f.file)
+        stem = os.path.splitext(name)[0]
+        for base in (stem, stem + "-poster", stem + ".poster", "poster", "folder", "cover"):
+            for ext in (".jpg", ".jpeg", ".png", ".webp"):
+                path = os.path.join(folder, base + ext)
+                if os.path.isfile(path):
+                    return path
+        return None
+
+    def emblem(self, side: str) -> str:
+        """The emblem chosen for a side as a URL ('' if none), its white (or any
+        flat, pale) background made see-through."""
+        chosen = self.options.get(f"emblem_{side}")
+        if not chosen:
+            return ""
+        src = self.ctx.user_file(chosen)
+        if not os.path.isfile(src):
+            self.ctx.log(f"    emblem not found: {chosen}")
+            return ""
+        folder = os.path.join(self.ctx.out, "frames")
+        os.makedirs(folder, exist_ok=True)
+        out = os.path.join(folder, f"emblem_{side}_{int(os.path.getmtime(src))}.png")
+        if not os.path.exists(out):
+            im = Image.open(src)
+            has_alpha = im.mode in ("RGBA", "LA") and im.getchannel("A").getextrema()[0] < 250
+            im = im.convert("RGBA")
+            if not has_alpha:                      # white paper -> nothing; the edge fades over 30 levels
+                r, g, b, _ = im.split()
+                from PIL import ImageChops
+                darkest = ImageChops.darker(ImageChops.darker(r, g), b)
+                im.putalpha(darkest.point(lambda v: 255 if v < 215 else max(0, round((245 - v) * 8.5))))
+            box = im.getchannel("A").getbbox()
+            if box:
+                im = im.crop(box)
+            im.thumbnail((1200, 1200), Image.LANCZOS)
+            im.save(out)
+        return self.ctx.uri(out)
 
     def build(self, ctx):
         o = self.options
@@ -353,9 +436,16 @@ class Theme(BaseTheme):
     # ------------------------------------------------------------------ main
     def main(self, music):
         ctx, e, o, n = self.ctx, self.e, self.options, self.n
+        posters = {f.number: self.poster(f) for f in ctx.films}
+        with_posters = any(posters.values())
         w = {1: 620, 2: 600, 3: 520, 4: 396, 5: 300}[n]
         gap = {1: 0, 2: 110, 3: 70, 4: 60, 5: 60}[n]
         h, top = 590, 300
+        if with_posters:                           # upright doors, the poster filling each
+            w = {1: 400, 2: 400, 3: 400, 4: 370, 5: 300}[n]
+            gap = {1: 0, 2: 170, 3: 130, 4: 70, 5: 60}[n]
+            h = round((w - 24) * 1.5) + 24
+            top = 296 + (600 - h) // 2
         x0 = (1920 - (n * w + (n - 1) * gap)) // 2
         shot_h = 330
         doors, locks = "", ""
@@ -368,6 +458,21 @@ class Theme(BaseTheme):
                 size = round(size * .78)
             meta = " &nbsp;·&nbsp; ".join(x_ for x_ in [str(f.year or ""), f.runtime] if x_)
             src = self.shot(f, .32, 960)
+            if with_posters:
+                art = ctx.uri(posters[f.number]) if posters[f.number] else src
+                doors += f"""
+            <div class='door' style='left:{x}px;top:{top}px;width:{w}px;height:{h}px'>
+              <div class='shell'></div>
+              <div class='poster' style='background-image:url("{art}")'></div>
+              <div class='abs' style='left:0;right:0;top:12px;height:{h - 24}px;overflow:hidden'><div class='scan' style='--travel:{h + 70}px'></div></div>
+              <div class='strip'><b>{f.number:02d}</b><span>{meta}</span></div>
+              <div class='seam' style='bottom:10px;animation-delay:-{i * .5:.1f}s'></div>
+              <div class='rivet' style='left:16px;top:44px'></div><div class='rivet' style='right:16px;top:44px'></div>
+            </div>"""
+                nav = {"left": ids[i - 1], "right": ids[(i + 1) % n], "down": "all" if n > 1 else ids[i]}
+                locks += lock(ids[i], x - 18, top - 18, w + 36, h + 36, "OPEN", act.menu(f"film{f.number:02d}", "play"),
+                              nav, default=(i == 0))
+                continue
             doors += f"""
             <div class='door' style='left:{x}px;top:{top}px;width:{w}px;height:{h}px'>
               <div class='shell'></div>
@@ -394,12 +499,25 @@ class Theme(BaseTheme):
         tsize = fit(title, [(10, 150), (14, 128), (20, 104), (28, 82), (99, 64)])
         all_btn = (f"<div class='btn' data-button='all' data-action='{act.playall()}' data-nav-up='{ids[n // 2]}'"
                    f" style='left:50%;top:942px;transform:translateX(-50%)'><span class='mk'></span>PLAY ALL</div>") if n > 1 else ""
+        el, er = self.emblem("left"), self.emblem("right")
+        marks = ""
+        if el or er:
+            half = min(700, max(380, len(title) * tsize * .23 + 60))        # half the title's width, roughly
+            for src, side, x in ((el, "l", 960 - half - 190), (er, "r", 960 + half + 20)):
+                if src:
+                    ghost_x = -170 if side == "l" else 1270
+                    marks += (f"<div class='emblem ghost' style='left:{ghost_x}px;top:150px;width:820px;height:820px;"
+                              f"background-image:url(\"{src}\")'></div>"
+                              f"<div class='emblem {side}' style='left:{x:.0f}px;top:66px;width:170px;height:190px;"
+                              f"background-image:url(\"{src}\")'></div>")
+        strips = "" if marks else glyphs(96, 76, 520, 11, self.a) + glyphs(1304, 76, 520, 23, self.a)
         body = f"""
         <div class='bg'></div><div class='hex'></div>
         <div class='machine'><div class='ring r1'></div><div class='ring r2'></div><div class='ring r3'></div><div class='ring r4'></div></div>
         <div class='rays'></div><div class='core'></div>
+        {marks}
         {sparks(46, 7)}
-        {glyphs(96, 76, 520, 11, self.a)}{glyphs(1304, 76, 520, 23, self.a)}
+        {strips}
         <div class='abs' style='left:0;right:0;top:70px;text-align:center'>
           <div class='kick' style='font-size:30px'>{e(o.get('tagline') or '')}</div>
           <div class='metal' style='font-size:{tsize}px;margin-top:8px'>{e(title)}</div>
@@ -430,16 +548,30 @@ class Theme(BaseTheme):
         for i, bid in enumerate(ids):
             nav = {"up": ids[i - 1], "down": ids[(i + 1) % len(ids)]}
             buttons += btn(bid, 96 + i * 26, 690 + i * 96, labels[bid][0], labels[bid][1], nav, default=(i == 0))
+        poster = self.poster(f)
+        if poster:
+            feature = (f"<div class='reticle' style='left:1250px;top:190px'></div>"
+                       f"<div class='one-sheet' style='left:1320px;top:120px;width:380px;height:558px'>"
+                       f"<div class='glow'></div><div class='shell'></div>"
+                       f"<div class='art' style='background-image:url(\"{ctx.uri(poster)}\")'></div></div>")
+        else:
+            feature = "<div class='reticle' style='left:1190px;top:230px'></div>"
+        el = self.emblem("left")
+        mark = (f"<div class='emblem l' style='left:96px;top:132px;width:92px;height:100px;background-image:url(\"{el}\")'></div>"
+                if el else "")
+        tx = 212 if el else 96
         body = f"""
         <div class='back' style='background-image:url("{self.shot(f, .55)}")'></div>
         <div class='back-grade'></div>
-        <div class='reticle' style='left:1190px;top:230px'></div>
+        {feature}{mark}
         {sparks(22, 30 + f.number)}
         <div class='flare fl1' style='top:604px'></div><div class='flare fl3' style='top:490px;left:1000px;width:900px'></div>
-        {glyphs(96, 112, 600, 40 + f.number, self.a)}
-        <div class='abs' style='left:96px;top:150px;width:1240px'>
+        {glyphs(tx, 112, 600, 40 + f.number, self.a)}
+        <div class='abs' style='left:{tx}px;top:150px;width:1140px'>
           <div class='kick' style='font-size:34px'>{e(kick) or f'FILM {f.number} OF {n}'}</div>
-          <div class='metal' style='font-size:{size}px;margin-top:14px;padding-right:30px'>{e(ttl)}</div>
+        </div>
+        <div class='abs' style='left:96px;top:{250 if el else 200}px;width:{1180 if poster else 1240}px'>
+          <div class='metal' style='font-size:{round(size * (.86 if poster else 1))}px;padding-right:30px'>{e(ttl)}</div>
         </div>
         <div class='rule' style='left:96px;top:640px;width:900px'></div>
         <div class='readout' style='left:1240px;top:800px'>running time<b>{f.runtime}</b></div>

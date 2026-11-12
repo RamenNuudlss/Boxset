@@ -519,8 +519,16 @@ OK to jump there. It works while the film is playing; whether it also opens whil
 depends on the player. A Blu-ray can't show anything by itself when you press Pause (only the player's
 own display appears then), so the bar is on the Pop-up Menu button.
 
+**Your own posters and emblems.** Give a film a poster and its door becomes the poster,
+which also hangs on the film's page. Choose each one in the theme's settings, or save a
+picture beside the film with the same name (`Heat (1995).jpg`) or as `poster.jpg` in its
+folder, and Boxset finds it. Two emblem slots put a picture of yours either side of the
+title, lit in the theme's two colours; a white background is removed. These are your
+files: Boxset doesn't come with any artwork from films.
+
 **Settings:** the title and the line above it, the energy and spark colours, moving
-backgrounds on or off, the progress bar on or off, and main menu music.
+backgrounds on or off, the progress bar on or off, main menu music, two emblems, and a
+poster for each film.
 **Fits:** 1 to 5 films.
 
 The film frames in these screenshots are abstract stand-ins. On your disc they're frames

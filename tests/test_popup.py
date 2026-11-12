@@ -240,3 +240,35 @@ def test_split_title():
     assert mod.split_title("Transformers: Dark of the Moon") == ("Transformers", "Dark of the Moon")
     assert mod.split_title("Heat") == ("", "Heat")
     assert mod.split_title("Mission - Impossible") == ("Mission", "Impossible")
+
+
+def test_ironclad_finds_posters_and_clears_an_emblems_background(tmp_path):
+    mod = _ironclad()
+    film_file = tmp_path / "films" / "Heat (1995).mkv"
+    film_file.parent.mkdir()
+    film_file.write_bytes(b"")
+    film = FilmInfo(1, "Heat", 1995, "", False, str(film_file), 6000.0, [Chapter(1, 0.0, "0:00:00", None)], {})
+    emblem = tmp_path / "mark.png"
+    im = Image.new("RGB", (300, 300), "white")
+    im.paste((60, 66, 74), (60, 60, 240, 240))
+    im.paste("white", (130, 130, 170, 170))                  # a cut-out in the middle
+    im.save(emblem)
+    logs = []
+    ctx = types.SimpleNamespace(out=str(tmp_path / "build"), user_file=lambda p: p, log=logs.append,
+                                uri=lambda p: "file://" + p)
+    theme = mod.Theme({"emblem_left": str(emblem), "poster1": str(tmp_path / "missing.jpg")})
+    theme.ctx = ctx
+    assert theme.poster(film) is None and "not found" in logs[-1]
+    (film_file.parent / "poster.jpg").write_bytes(b"x")
+    assert theme.poster(film).endswith("poster.jpg")
+    (film_file.parent / "Heat (1995).png").write_bytes(b"x")
+    assert theme.poster(film).endswith("Heat (1995).png")    # the film's own name comes first
+    chosen = tmp_path / "mine.jpg"
+    chosen.write_bytes(b"x")
+    theme.options["poster1"] = str(chosen)
+    assert theme.poster(film) == str(chosen)
+
+    out = Image.open(theme.emblem("left")[len("file://"):])
+    assert out.size == (180, 180)                            # trimmed to the mark itself
+    assert out.getpixel((5, 5))[3] == 255 and out.getpixel((90, 90))[3] == 0
+    assert theme.emblem("right") == ""
