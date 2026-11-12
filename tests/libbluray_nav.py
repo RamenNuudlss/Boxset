@@ -4,7 +4,8 @@ player actually draws.
 
     python tests/libbluray_nav.py <disc folder> <out folder> KEY KEY ...
 
-Keys: up down left right enter menu. Prints events; saves one PNG of the
+Keys: up down left right enter menu popup. `wait` plays to the end of the title,
+`play:N` plays on for N seconds. Prints events; saves one PNG of the
 interactive-graphics plane after each key.
 """
 import ctypes as C
@@ -42,11 +43,16 @@ lib.bd_user_input.argtypes = [C.c_void_p, C.c_int64, C.c_uint32]
 lib.bd_register_overlay_proc.argtypes = [C.c_void_p, C.c_void_p, OVERLAY_CB]
 lib.bd_get_titles.argtypes = [C.c_void_p, C.c_uint8, C.c_uint32]
 lib.bd_close.argtypes = [C.c_void_p]
+lib.bd_tell_time.restype = C.c_uint64
+lib.bd_tell_time.argtypes = [C.c_void_p]
 
 EVENTS = {1: "ERROR", 2: "READ_ERROR", 5: "TITLE", 6: "PLAYLIST", 7: "PLAYITEM", 8: "CHAPTER",
           10: "END_OF_TITLE", 11: "AUDIO_STREAM", 12: "IG_STREAM", 22: "PLAYLIST_STOP",
           25: "STILL", 26: "STILL_TIME", 29: "POPUP", 30: "MENU"}
-KEYS = {"up": 12, "down": 13, "left": 14, "right": 15, "enter": 16, "menu": 10}
+KEYS = {"up": 12, "down": 13, "left": 14, "right": 15, "enter": 16, "menu": 10, "popup": 11}
+# how much of the stream is read after each key (400 suits menus; inside a film
+# that is about a minute, so set NAV_PUMP=2 to stay where you are)
+AFTER_KEY = int(os.environ.get("NAV_PUMP", "400"))
 OV = {0: "INIT", 1: "CLOSE", 2: "CLEAR", 3: "DRAW", 4: "WIPE", 5: "HIDE", 6: "FLUSH"}
 
 
@@ -62,7 +68,7 @@ class Plane:
         if ov.plane != 1:          # 1 = interactive graphics plane
             return
         cmd = OV.get(ov.cmd, ov.cmd)
-        if cmd in ("INIT", "CLEAR", "CLOSE"):
+        if cmd in ("INIT", "CLEAR", "CLOSE", "HIDE"):
             self.img = Image.new("RGBA", (1920, 1080), (0, 0, 0, 0))
         elif cmd == "WIPE":
             self.img.paste((0, 0, 0, 0), (ov.x, ov.y, ov.x + ov.w, ov.y + ov.h))
@@ -135,11 +141,18 @@ def main():
         if key == "wait":           # keep playing (reads the stream to the end of a title)
             print("wait:", end=" ")
             pump(bd, 6000, print)
+        elif key.startswith("play:"):       # keep playing for this many seconds of the film
+            target = lib.bd_tell_time(bd) + int(float(key[5:]) * 90000)
+            for _ in range(20000):
+                if lib.bd_tell_time(bd) >= target:
+                    break
+                pump(bd, 5, lambda _: None)
+            print(f"{key}: now at {lib.bd_tell_time(bd) / 90000:.1f}s")
         else:
             lib.bd_user_input(bd, -1, KEYS[key])
             print(f"{key}:", end=" ")
-            pump(bd, 400, print)
-        plane.img.save(os.path.join(out, f"{k:02d}_{key}.png"))
+            pump(bd, AFTER_KEY, print)
+        plane.img.save(os.path.join(out, f"{k:02d}_{key.replace(':', '')}.png"))
     lib.bd_close(bd)
 
 

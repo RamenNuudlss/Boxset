@@ -17,7 +17,7 @@ import subprocess
 import threading
 import time
 
-from . import budget, chapters, config, core, encoders, estimate, probe, subs as submod, thumbs, tracks, winfix
+from . import budget, chapters, config, core, encoders, estimate, popup, probe, subs as submod, thumbs, tracks, winfix
 
 DISC_FPS = probe.DISC_FPS      # source frame rate -> the rate it has on the disc
 PROBE_CACHE_VERSION = 1        # bump when probe.Media gains something a cached entry would lack
@@ -204,6 +204,7 @@ def render_menus(coll, media, job: Job, force=False) -> dict:
                   "pct": 0.5 + min(0.49, done["n"] / (len(coll.films) * 2 + 4) * 0.5)})
 
     ctx = core.Context(coll, films, theme_dir, coll.build, coll.theme_options, log=tlog, check=job.check)
+    ctx.hdr = {n: m.hdr for n, m in media.items() if m.hdr}
     try:
         theme.build(ctx)
     finally:
@@ -590,7 +591,31 @@ def assemble(coll, media, manifest, clips, job: Job, fast=False) -> dict:
             shutil.rmtree(d)
     os.makedirs(stage)
     start = f"menu:{manifest['start']}"
-    disc = Disc(first_play=start, title_key=start)
+    popups = {int(n): popup.load(os.path.join(coll.build, rel))
+              for n, rel in (manifest.get("popups") or {}).items()}
+
+    class PopupDisc(Disc):
+        """A Disc whose pop-ups are Boxset's: a frame for each moment of the film
+        (popup.py), where bdmvkit's own show one picture throughout."""
+
+        def _add_popup(self, t, buttons, default, pt, nav):
+            from bdmvkit import hdmv
+            from bdmvkit.formats import FORMATS
+            from bdmvkit.m2ts import scan_m2ts
+            number = self.titles.index(t) + 1
+            data, m = popups[number], media[coll.films[number - 1].number]
+            job.check()
+            job.log(f"Adding the pop-up to {coll.films[number - 1].title}")
+            commands = {}
+            for b, pb in zip(data["frames"][0]["buttons"], pt.popup_buttons):
+                if b["action"] == "close":
+                    commands[b["id"]] = [hdmv.popup_off()]
+                elif b["action"]:
+                    commands[b["id"]] = nav.button(pb)
+            sets = popup.schedule(data, commands, FORMATS[t.fps][1], m.tempo, m.duration * m.tempo)
+            popup.insert(t.clip, pt.clip, sets, scan_m2ts(t.clip).first_pts, job.check)
+
+    disc = PopupDisc(first_play=start, title_key=start)
     for film in coll.films:
         m = media[film.number]
         staged = os.path.join(stage, f"film{film.number:02d}.m2ts")
@@ -599,6 +624,10 @@ def assemble(coll, media, manifest, clips, job: Job, fast=False) -> dict:
         disc.add_title(staged, fps=DISC_FPS[m.fps], chapters=[round(t * m.tempo, 3) for t in m.chapters],
                        audio=[tuple(a) for a in made["audio"]], subtitles=list(made["subs"]),
                        end=manifest["title_ends"][str(film.number)])
+    for number, data in sorted(popups.items()):
+        disc.add_popup(number, [MenuButton(b["id"], b["x"], b["y"], selected="",
+                                           action=b["action"] if b["action"] not in ("", "close") else None)
+                                for b in data["frames"][0]["buttons"]])
     for pid, items in manifest["playlists"].items():
         disc.add_playlist(pid, items, end=manifest["playlist_ends"].get(pid, start))
     menu_fps = DISC_FPS[media[coll.films[0].number].fps]

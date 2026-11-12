@@ -466,7 +466,7 @@ it again.
 
 A theme decides everything you see on the disc: how many screens there are, what's on
 them, how the buttons look in each state, and where every button leads. Boxset comes
-with two.
+with three.
 
 ### Tachometer
 
@@ -501,6 +501,30 @@ FLAC or M4A, looped), and story order, which adds a *Story order* ticket.
 
 The chapter frames in these screenshots are abstract stand-ins. On your disc they're
 frames from your own films.
+
+### Ironclad
+
+Heavy machinery: a blast door for each film with a frame from the film behind it, rings
+turning in the dark, light sweeping through, sparks. Each film has its own page over a
+full-screen frame, and scene selection.
+
+| ![Ironclad main menu](docs/images/ironclad-main.webp) | ![Ironclad film page](docs/images/ironclad-film.webp) |
+|---|---|
+| ![Ironclad scene selection](docs/images/ironclad-scenes.webp) | ![Ironclad progress bar over a film](docs/images/ironclad-progress.webp) |
+
+**The progress bar.** While a film plays, press the remote's **Pop-up Menu** button for a
+bar in the same style: how far in you are, to the minute; every chapter as a segment,
+with the one playing marked; **Resume** and **Menu**. Move left onto a chapter and press
+OK to jump there. It works while the film is playing; whether it also opens while paused
+depends on the player. A Blu-ray can't show anything by itself when you press Pause (only the player's
+own display appears then), so the bar is on the Pop-up Menu button.
+
+**Settings:** the title and the line above it, the energy and spark colours, moving
+backgrounds on or off, the progress bar on or off, and main menu music.
+**Fits:** 1 to 5 films.
+
+The film frames in these screenshots are abstract stand-ins. On your disc they're frames
+from your own films.
 
 ### Installing theme packs
 
@@ -563,7 +587,7 @@ before anything is built. The full guide is in **[THEMES.md](THEMES.md)**.
 | **Subtitles** | Text (SRT, ASS, MP4 text, WebVTT) and 1080p Blu-ray picture subtitles (PGS), up to 8 per film | DVD picture subtitles (VobSub), 4K PGS, and text in scripts that need shaping (Arabic, Hebrew, Thai, Indic scripts) are left out, with a note in the build log. Forced subtitles aren't shown automatically |
 | **Chapters** | From the file | Files without chapters get a single chapter, and scene selection is skipped for them. Chapters closer than 5 seconds together are merged |
 | **Disc types** | BD-25, BD-50, BD-100 | Single-disc collections only |
-| **Films per disc** | Set by the theme | Tachometer 2–12, Marquee 1–11 |
+| **Films per disc** | Set by the theme | Tachometer 2–12, Marquee 1–11, Ironclad 1–5 |
 
 **Rules every menu follows**, because players require them (Boxset checks these for
 every theme):

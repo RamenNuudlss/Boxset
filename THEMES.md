@@ -18,6 +18,7 @@ mix both.
 - [Screens drawn with HTML](#screens-drawn-with-html)
 - [Screens drawn as images](#screens-drawn-as-images)
 - [Actions, navigation and playlists](#actions-navigation-and-playlists)
+- [Pop-ups during the film](#pop-ups-during-the-film)
 - [Blu-ray rules](#blu-ray-rules)
 - [Testing a theme](#testing-a-theme)
 - [Sharing a theme](#sharing-a-theme)
@@ -72,7 +73,8 @@ class Theme(BaseTheme):
 That's a working disc: the first button starts highlighted, up and down move
 between films, and OK plays the highlighted one. The built-in themes in
 [`boxset/themes/`](boxset/themes) are complete, larger examples: Tachometer
-draws with Pillow, and Marquee draws with HTML, including a motion background.
+draws with Pillow, Marquee draws with HTML, including a motion background, and
+Ironclad does both and adds a pop-up progress bar.
 
 ## Where themes live
 
@@ -150,6 +152,8 @@ Their values arrive as `film.extra["tagline"]`.
 | `ctx.film(n)` | Film number `n` |
 | `ctx.pages(items, n)` | Split a list (such as chapters) into pages of `n` |
 | `ctx.story_order(value)` | Validate an `order` setting (see above) |
+| `ctx.frame(n, seconds)` | A picture from film `n` at that moment, as a JPEG's path (1920 wide; `width=` for another size). For backdrops; `None` if it couldn't be read |
+| `ctx.popup(n)` | Film `n`'s pop-up (see [Pop-ups during the film](#pop-ups-during-the-film)) |
 | `ctx.asset("img/x.png")` | Path to a file in your theme folder |
 | `ctx.user_file(path)` | Path to a file the user chose in your settings |
 | `ctx.uri(path)` | A `file://` URL for using any local file inside HTML |
@@ -236,6 +240,7 @@ letter-spaced text, slanted boxes and the dial.
 | `act.playall()` | Plays every film in disc order |
 | `act.playlist(pid)` | Plays a playlist made with `ctx.playlist(pid, [3, 1, 2])` |
 | `act.back()` | Returns to the previous menu |
+| `act.close()` | In a pop-up only: closes it and carries on watching |
 
 After playback, the player goes back to the start menu unless you say otherwise:
 
@@ -243,6 +248,64 @@ After playback, the player goes back to the start menu unless you say otherwise:
 ctx.after_film(n, act.menu(f"film{n:02d}", "play"))   # back to the film's own page
 ctx.after_playlist("story", act.menu("main", "story"))
 ```
+
+## Pop-ups during the film
+
+A theme can give each film a pop-up: what the remote's **Pop-up Menu** button shows
+over the film while it plays. The Ironclad theme uses one for its progress bar.
+
+A Blu-ray menu can't draw anything by itself, so a pop-up that shows the time is
+made of *frames*: you draw the pop-up as it should look at 0:00, at 0:01, at 0:02
+and so on, and Boxset puts each one into the film at its moment. Whenever the
+viewer opens the pop-up, they see the frame for where they are.
+
+```python
+pop = ctx.popup(film.number)
+for t in pop.moments(every=60):            # each minute, and each chapter's start
+    fr = pop.frame(t)
+    fr.label("time", 96, 900, time_picture(t))                       # only shown
+    fr.button("resume", 1500, 900, {"normal": a, "selected": b}, act.close())
+    fr.button("menu", 1680, 900, {"normal": c, "selected": d}, act.menu("main"))
+    fr.chain(["resume", "menu"])
+    fr.default = "resume"
+```
+
+- **Pictures** are Pillow images (RGBA), drawn by the theme. A pop-up has no
+  background of its own: whatever its pictures don't cover is the film.
+- `fr.button(id, x, y, {"normal": …, "selected": …}, action, nav=None)`: the two
+  pictures must be the same size. `nav` is `{"left": id, …}`; a direction you
+  leave out stays on the button (there's no "nearest button" in a pop-up).
+- `fr.label(id, x, y, picture)` is a picture the remote can't move onto.
+- `fr.chain(ids, wrap=False, axis="horizontal")` links buttons in order.
+- `pop.chapter_at(t)` is the chapter playing at `t`; `pop.moments(every)` gives
+  the times to draw for.
+- **Actions**: `act.chapter`, `act.title`, `act.menu`, `act.playall`,
+  `act.playlist` and `act.close()`.
+
+Rules, checked before the disc is built:
+
+- Every frame has the same buttons, with the same ids and actions. Their
+  pictures, positions, navigation and default button can change from frame to
+  frame.
+- Buttons and labels can't overlap (their whole rectangles count), and must be
+  on the screen. To make one continuous panel, cut it into tiles that sit edge
+  to edge.
+- Frames are at least 2 seconds apart, in time order, the first at 0.
+- All of a pop-up's pictures share 255 colours.
+
+Things to know:
+
+- Each distinct picture is stored once, so draw only what changes: a time
+  readout changes every frame, a Resume button never does.
+- The frame showing is repeated in the film every few seconds, so the pop-up is
+  there again soon after a jump. Expect a pop-up to add roughly 30 to 80 MB to
+  a two-hour film.
+- A player can only show a pop-up when its button is pressed. Nothing on a
+  standard Blu-ray can react to Pause by itself.
+- A film with a pop-up is copied once more while the disc is written, which
+  takes a few minutes and, for that time, the film's size again in free space.
+- `build\menus\popups\filmNN.png` shows one frame of each pop-up after a
+  render.
 
 ## Blu-ray rules
 
