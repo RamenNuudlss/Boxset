@@ -401,7 +401,8 @@ class Api:
         return self.state()
 
     def pick_option_file(self, key: str, kind: str = "audio"):
-        types = (f"Audio ({';'.join(AUDIO_EXTS)})",) if kind == "audio" else ("All files (*.*)",)
+        types = ((f"Audio ({';'.join(AUDIO_EXTS)})",) if kind == "audio" else
+                 ("Pictures (*.jpg;*.jpeg;*.png;*.webp)",) if kind == "image" else ("All files (*.*)",))
         res = self._dialog("open", "Choose a file", types)
         if res:
             return self.set_option(key, res[0])

@@ -93,6 +93,11 @@ class act:
     def back() -> str:
         return "lastmenu"
 
+    @staticmethod
+    def close() -> str:
+        """In a film's pop-up: close it and carry on watching."""
+        return "close"
+
 
 # ----------------------------------------------------------------- menu building
 
@@ -185,6 +190,8 @@ class Context:
         self.options = options
         self.log = log
         self.menus: dict[str, Menu] = {}
+        self.popups: dict = {}                   # film number -> popup.Popup
+        self.hdr: dict = {}                      # film number -> "hdr10" / "hlg" for HDR films
         self.playlists: dict[str, list[int]] = {}
         self.first: str | None = None
         self.title_ends: dict[int, str] = {}
@@ -198,6 +205,28 @@ class Context:
 
     def film(self, n: int) -> FilmInfo:
         return self.films[n - 1]
+
+    def frame(self, film_number: int, seconds: float, width: int = 1920) -> str | None:
+        """A picture from film `film_number` at `seconds`, as a JPEG `width` wide
+        (for backdrops; chapter thumbnails are in film.chapters). HDR films are
+        converted like everything else. None if the frame couldn't be read."""
+        import subprocess
+        from .probe import need
+        film = self.film(film_number)
+        seconds = max(0.0, min(float(seconds), max(0.0, film.duration - 1)))
+        folder = os.path.join(self.out, "frames")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"film{film_number:02d}_{round(seconds * 10):07d}_{width}.jpg")
+        if not os.path.exists(path):
+            vf = f"scale={width}:-2:flags=lanczos"
+            if self.hdr.get(film_number) in ("hdr10", "hlg"):
+                from . import tracks
+                if tracks.tonemap_available():
+                    vf += "," + tracks.tonemap_filter(self.hdr[film_number])
+            subprocess.run([need("ffmpeg"), "-v", "error", "-y", "-ss", f"{seconds:.3f}", "-i", film.file,
+                            "-frames:v", "1", "-vf", vf, "-q:v", "2", path], check=False, capture_output=True,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return path if os.path.exists(path) else None
 
     def asset(self, *parts) -> str:
         """Path to a file inside the theme folder."""
@@ -241,6 +270,14 @@ class Context:
         if self.first is None:
             self.first = menu_id
         return m
+
+    def popup(self, film_number: int):
+        """Film `film_number`'s pop-up: what the remote's Pop-up Menu button shows
+        over the film while it plays (see boxset/popup.py)."""
+        from .popup import Popup
+        if film_number not in self.popups:
+            self.popups[film_number] = Popup(self.film(film_number))
+        return self.popups[film_number]
 
     def playlist(self, pid: str, film_numbers: list[int]):
         self.playlists[pid] = list(film_numbers)
@@ -520,6 +557,9 @@ def validate(ctx: Context) -> tuple[list[str], list[str]]:
         err = _check_action(ctx, a, n)
         if err:
             errors.append(f"end of {'film' if isinstance(k, int) else 'playlist'} {k}: {err}")
+    if ctx.popups:
+        from . import popup
+        errors += popup.validate(ctx, lambda a: _check_action(ctx, a, n))
     missing = sorted(set(range(1, n + 1)) - reachable_films)
     if missing:
         warnings.append(f"No button plays film(s) {missing}")
@@ -622,8 +662,17 @@ def write_manifest(ctx: Context) -> dict:
                             "action": b.action, "nav": b.nav, "auto": b.auto})
         menus.append({"id": m.id, "background": rel(bg), "music": rel(music) if music else None,
                       "loop_seconds": m.loop_seconds, "default_button": m.default, "buttons": buttons})
+    popups = {}
+    if ctx.popups:
+        from . import popup
+        for number, pop in sorted(ctx.popups.items()):
+            ctx.check()
+            saved = popup.save(pop, os.path.join(root, "popups"), f"film{number:02d}")
+            popups[str(number)] = "menus/popups/" + saved["file"]
+            middle = pop.frames[len(pop.frames) // 2]
+            middle.compose(middle.default).save(os.path.join(root, "popups", f"film{number:02d}.png"))
     home = f"menu:{ctx.first}"
-    manifest = {"start": ctx.first, "playlists": ctx.playlists, "menus": menus,
+    manifest = {"start": ctx.first, "playlists": ctx.playlists, "menus": menus, "popups": popups,
                 "title_ends": {str(f.number): ctx.title_ends.get(f.number, home) for f in ctx.films},
                 "playlist_ends": {p: ctx.playlist_ends.get(p, home) for p in ctx.playlists},
                 "films": [{"number": f.number, "title": f.title, "chapters": [c.start for c in f.chapters]}
