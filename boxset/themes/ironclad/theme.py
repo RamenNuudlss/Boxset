@@ -416,7 +416,9 @@ class Theme(BaseTheme):
                 self.scenes(f)
             nxt = ctx.films[f.number % self.n]           # when a film ends: the bay, on the next door
             ctx.after_film(f.number, act.menu("main", f"film{nxt.number}"))
-        if o.get("popup", True):
+        if o.get("popup", True) and not hasattr(ctx, "popup"):
+            ctx.log("  progress bar skipped: this version of Boxset can't put a pop-up in a film yet")
+        elif o.get("popup", True):
             for f in ctx.films:
                 ctx.log(f"  progress bar {f.number:02d}")
                 Hud(f, self.n, self.a, self.b).build(ctx.popup(f.number))
@@ -425,9 +427,25 @@ class Theme(BaseTheme):
     def page(self, body: str) -> str:
         return page(body, self.a, self.b)
 
+    def _frame(self, number: int, seconds: float, width: int = 1920):
+        """A frame from a film as a JPEG (for Boxset versions without ctx.frame)."""
+        import subprocess
+        from boxset.probe import need
+        film = self.ctx.film(number)
+        seconds = max(0.0, min(float(seconds), max(0.0, film.duration - 1)))
+        folder = os.path.join(self.ctx.out, "frames")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"film{number:02d}_{round(seconds * 10):07d}_{width}.jpg")
+        if not os.path.exists(path):
+            subprocess.run([need("ffmpeg"), "-v", "error", "-y", "-ss", f"{seconds:.3f}", "-i", film.file,
+                            "-frames:v", "1", "-vf", f"scale={width}:-2:flags=lanczos", "-q:v", "2", path],
+                           check=False, capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return path if os.path.exists(path) else None
+
     def shot(self, film, part: float, width: int = 1920) -> str:
         """A frame from `part` of the way through the film, as a URL ('' if there's none)."""
-        path = self.ctx.frame(film.number, film.duration * part, width)
+        grab = getattr(self.ctx, "frame", None) or self._frame
+        path = grab(film.number, film.duration * part, width)
         if not path:
             thumbs = [c.thumb for c in film.chapters if c.thumb]
             path = thumbs[len(thumbs) // 2] if thumbs else None
