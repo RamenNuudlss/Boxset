@@ -26,6 +26,8 @@
           <button role="menuitem" data-act="open">Open project…</button>
           <button role="menuitem" data-act="saveas">Save project as…</button>
           <button role="menuitem" data-act="folder">Show project folder</button>
+          <div class="menu-sep"></div>
+          <button role="menuitem" data-act="updates" id="checkUpdates">Check for updates</button>
           <div class="menu-sep" id="recentSep"></div>
           <div id="recentList"></div>
         </div>
@@ -37,6 +39,7 @@
       <button role="tab" class="tab" data-view="build" aria-selected="false">Build</button>
     </nav>
     <div class="top-actions">
+      <button class="btn update-btn" id="updateBtn" hidden></button>
       <button class="btn primary" id="primaryAction">Build disc</button>
     </div>
   </header>

@@ -207,6 +207,7 @@ function renderHeader() {
     btn.className = "btn primary";
     btn.disabled = !n || hasProblems();
   }
+  renderUpdate();
   const rl = $("#recentList");
   const recent = (S.recent || []).filter((r) => r.exists && r.path !== S.path);
   $("#recentSep").hidden = !recent.length;
@@ -332,9 +333,40 @@ function tracksControl() {
          "Films whose picture or sound came straight off a Blu-ray are copied, not encoded again: no quality lost and far quicker. Everything else is encoded as usual.");
 }
 
+function canSelfUpdate() { return !!(S.update && S.update.installer && S.can_self_update); }
+
+function renderUpdate() {
+  const b = $("#updateBtn"), u = S.update, st = S.update_state || { phase: "idle" };
+  $("#checkUpdates").textContent = st.phase === "checking" ? "Checking for updates…" : `Check for updates (you have ${S.version})`;
+  b.hidden = !u;
+  if (!u) return;
+  b.style.removeProperty("--pct");
+  b.classList.remove("busy");
+  if (st.phase === "downloading") {
+    b.textContent = `Downloading ${Math.round((st.pct || 0) * 100)}%`;
+    b.style.setProperty("--pct", `${(st.pct || 0) * 100}%`);
+    b.classList.add("busy");
+    b.disabled = true; b.title = "";
+  } else if (st.phase === "installing") {
+    b.textContent = "Installing…"; b.classList.add("busy"); b.disabled = true;
+    b.title = "Boxset closes and opens again once the new version is in";
+  } else if (!canSelfUpdate()) {
+    b.textContent = `Boxset ${u.version} is out`; b.disabled = false;
+    b.title = "Open the release page";
+  } else {
+    b.textContent = st.phase === "error" ? "Update failed: try again" : `Update to ${u.version}`;
+    b.disabled = !!S.job.running;
+    b.title = S.job.running ? "Finish or cancel the current job first"
+      : st.phase === "error" ? st.message || ""
+      : `Download Boxset ${u.version} and install it over this one. Boxset closes and opens again; your projects, settings and themes are kept.`;
+  }
+}
+
 function updateNote() {
-  return S.update ? `<div class="note update-note"><span>Boxset ${esc(S.update.version)} is out. You have ${esc(S.version)}.</span>
-    <button class="btn small" data-do="get-update">See what's new</button></div>` : "";
+  if (!S.update) return "";
+  const go = canSelfUpdate() ? `<button class="btn small primary" data-do="install-update" ${S.job.running ? "disabled" : ""}>Update now</button>` : "";
+  return `<div class="note update-note"><span>Boxset ${esc(S.update.version)} is out. You have ${esc(S.version)}.</span>
+    <span class="update-acts"><button class="btn small quiet" data-do="get-update">What's new</button>${go}</span></div>`;
 }
 
 function discPane() {
@@ -911,6 +943,7 @@ async function doThing(what, el) {
     }
     case "trust-themes": await act("trust_project_themes"); break;
     case "get-update": act("open_update"); break;
+    case "install-update": act("install_update"); break;
     case "open-disc": act("open_folder", "disc"); break;
     case "make-iso": await act("make_iso"); break;
     case "burn": act("burn"); break;
@@ -933,6 +966,7 @@ document.addEventListener("click", async (ev) => {
   }
   if (t.id !== "projectMenuBtn" && !t.closest("#projectMenu")) $("#projectMenu").hidden = true;
   if (t.matches(".tab")) { view = t.dataset.view; if (view === "menu" && !manifest) await loadManifest(true); render(); return; }
+  if (t.id === "updateBtn") { act(canSelfUpdate() ? "install_update" : "open_update"); return; }
   if (t.id === "primaryAction") { if (S.job.running) act("cancel"); else startBuild(); return; }
   if (t.id === "projectMenuBtn") { const m = $("#projectMenu"); m.hidden = !m.hidden; t.setAttribute("aria-expanded", String(!m.hidden)); return; }
   if (t.closest("#projectMenu")) {
@@ -943,6 +977,7 @@ document.addEventListener("click", async (ev) => {
     if (a === "open") { const r = await act("open_project"); if (r && r.__nodialog) { const p = prompt("Full path of a .boxset project:"); if (p) await act("open_project", p); } manifest = null; await loadManifest(true); render(); }
     if (a === "saveas") { const r = await act("save_project_as"); if (r && r.__nodialog) { const p = prompt("Save the project as (full path):"); if (p) await act("save_project_as", p); } }
     if (a === "folder") act("open_folder", "project");
+    if (a === "updates") act("check_for_updates");
     return;
   }
   if (t.dataset.removeTheme) {
