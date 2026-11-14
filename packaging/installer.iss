@@ -21,7 +21,10 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 ChangesAssociations=yes
-PrivilegesRequiredOverridesAllowed=dialog
+PrivilegesRequiredOverridesAllowed=dialog commandline
+; updating from inside the app: close Boxset if it's still open, then put it back
+CloseApplications=force
+RestartApplications=no
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
@@ -49,8 +52,15 @@ Root: HKA; Subkey: "Software\Classes\Boxset.Theme\shell\open\command"; ValueType
 [Run]
 Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installing Microsoft Edge WebView2…"; Check: NeedsWebView2; Flags: waituntilterminated skipifdoesntexist
 Filename: "{app}\Boxset.exe"; Description: "Open Boxset"; Flags: nowait postinstall skipifsilent
+; the app's own Update button runs setup quietly with /RELAUNCH=1: open Boxset again afterwards
+Filename: "{app}\Boxset.exe"; Flags: nowait runasoriginaluser; Check: Relaunch
 
 [Code]
+function Relaunch: Boolean;
+begin
+  Result := WizardSilent and (ExpandConstant('{param:RELAUNCH|0}') = '1');
+end;
+
 function NeedsWebView2: Boolean;
 var v: String;
 begin

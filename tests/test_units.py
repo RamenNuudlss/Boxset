@@ -237,7 +237,7 @@ def test_version_comparison():
 
 def test_update_check_never_raises_and_only_links_to_the_project():
     rel = {"tag_name": "v0.3.0", "html_url": "https://github.com/RamenNuudlss/Boxset/releases/tag/v0.3.0"}
-    assert updates.check("0.2.0", fetch=lambda: rel) == {"version": "0.3.0", "url": rel["html_url"]}
+    assert updates.check("0.2.0", fetch=lambda: rel) == {"version": "0.3.0", "url": rel["html_url"], "installer": None}
     assert updates.check("0.3.0", fetch=lambda: rel) is None
     assert updates.check("0.0.0", fetch=lambda: rel) is None                 # running from source
     assert updates.check("0.2.0", fetch=lambda: dict(rel, prerelease=True)) is None
@@ -247,3 +247,50 @@ def test_update_check_never_raises_and_only_links_to_the_project():
         raise OSError("no network")
     assert updates.check("0.2.0", fetch=broken) is None
     assert updates.check("0.2.0", fetch=lambda: ["nonsense"]) is None
+
+
+def _release_with(data: bytes, **asset):
+    import hashlib
+    a = {"name": "BoxsetSetup-0.3.1.exe", "size": len(data),
+         "digest": "sha256:" + hashlib.sha256(data).hexdigest(),
+         "browser_download_url": "https://github.com/RamenNuudlss/Boxset/releases/download/v0.3.1/BoxsetSetup-0.3.1.exe"}
+    a.update(asset)
+    return {"tag_name": "v0.3.1", "html_url": "https://github.com/RamenNuudlss/Boxset/releases/tag/v0.3.1",
+            "assets": [{"name": "notes.txt", "size": 3}, a]}
+
+
+def test_update_finds_only_this_projects_checked_installer():
+    data = b"pretend installer" * 1000
+    found = updates.check("0.3.0", fetch=lambda: _release_with(data))
+    assert found["installer"]["size"] == len(data) and found["installer"]["name"] == "BoxsetSetup-0.3.1.exe"
+    # another site, another file name, or no checksum from GitHub: no self-update, just the page
+    for bad in ({"browser_download_url": "https://evil.example/BoxsetSetup-0.3.1.exe"},
+                {"browser_download_url": "https://github.com/someone/Boxset/releases/download/v0.3.1/BoxsetSetup-0.3.1.exe"},
+                {"name": "BoxsetSetup-0.2.0.exe"}, {"digest": None}, {"digest": "md5:abc"}, {"size": 0}):
+        assert updates.check("0.3.0", fetch=lambda b=bad: _release_with(data, **b))["installer"] is None, bad
+
+
+def test_update_download_is_checked(tmp_path):
+    import io
+    data = b"pretend installer" * 100000
+    inst = updates.check("0.3.0", fetch=lambda: _release_with(data))["installer"]
+    (tmp_path / "BoxsetSetup-0.3.0.exe").write_bytes(b"old")          # left from the last update
+    seen = []
+    path = updates.download(inst, str(tmp_path), progress=seen.append, opener=lambda: io.BytesIO(data))
+    assert open(path, "rb").read() == data and seen[-1] == 1.0
+    assert sorted(os.listdir(tmp_path)) == ["BoxsetSetup-0.3.1.exe"]
+
+    for wrong, msg in ((data[:-1] + b"X", "checksum"), (data[:5000], "before it finished"),
+                       (data + b"extra" * 300000, "bigger")):
+        with pytest.raises(RuntimeError, match=msg):
+            updates.download(inst, str(tmp_path / "x"), opener=lambda w=wrong: io.BytesIO(w))
+        assert os.listdir(tmp_path / "x") == []                           # nothing half-written left
+    with pytest.raises(RuntimeError, match="cancelled"):
+        updates.download(inst, str(tmp_path / "y"), cancelled=lambda: True, opener=lambda: io.BytesIO(data))
+
+
+def test_update_runs_the_installer_quietly_and_reopens():
+    cmd = updates.install_command(r"C:\x\BoxsetSetup-0.3.1.exe")
+    assert cmd[0].endswith("BoxsetSetup-0.3.1.exe")
+    assert {"/SILENT", "/SP-", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/RELAUNCH=1"} <= set(cmd)
+    assert not updates.can_install() or os.name == "nt"                  # never from source / off Windows

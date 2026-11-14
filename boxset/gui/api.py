@@ -79,7 +79,8 @@ class Api:
         self.settings_path = os.path.join(config_dir(), "settings.json")
         self.settings = self._load_settings()
         core.restrict_project_themes(self.settings.get("trusted_theme_folders", []))
-        self.update = None                            # {"version", "url"} once a newer release is found
+        self.update = None                            # {"version", "url", "installer"} once a newer release is found
+        self.update_state = {"phase": "idle"}         # idle | checking | downloading | installing | error
         if self.settings.get("check_updates", True) and not os.environ.get("BOXSET_NO_UPDATE_CHECK"):
             threading.Thread(target=self._check_update, daemon=True).start()
         self.estimates = estimate.Cache(estimate.default_cache_path())
@@ -429,12 +430,85 @@ class Api:
             self.update = found
             self.push({"type": "update"})
 
+    def check_for_updates(self):
+        """Check again now (the Project menu's "Check for updates")."""
+        if self.update_state["phase"] in ("checking", "downloading", "installing"):
+            return {"ok": True}
+        self.update_state = {"phase": "checking"}
+        self.push({"type": "update"})
+
+        def run():
+            found = updates.check()
+            self.update = found or self.update
+            self.update_state = {"phase": "idle"}
+            self.push({"type": "update"})
+            if not found:
+                self.push({"type": "toast", "message": f"Boxset {__version__} is the latest version"
+                           if updates.parse(__version__) else "Running from source: update with git pull"})
+        threading.Thread(target=run, daemon=True).start()
+        return {"ok": True}
+
     def open_update(self):
         """Open the newer release's page in the browser."""
         import webbrowser
-        if self.update:
-            webbrowser.open(self.update["url"])
+        webbrowser.open(self.update["url"] if self.update else updates.RELEASES_PAGE)
         return {"ok": True}
+
+    def install_update(self):
+        """Download the newer installer, check it, run it over this copy and close
+        the app; the installer reopens Boxset when it's done."""
+        if not (self.update and self.update.get("installer") and updates.can_install()):
+            return self.open_update()          # nothing this copy can install itself: show the page
+        if self.update_state["phase"] in ("downloading", "installing"):
+            return {"ok": True}
+        self._busy_guard()                     # a build or menu render would be cut off
+        info = self.update
+
+        def state(phase, **kw):
+            self.update_state = {"phase": phase, **kw}
+            self.push({"type": "update"})
+
+        def run():
+            shown = [-1]
+
+            def prog(f):
+                pct = int(f * 100)
+                if pct != shown[0]:            # one event per percent, not per chunk
+                    shown[0] = pct
+                    state("downloading", pct=f)
+            try:
+                state("downloading", pct=0.0)
+                folder = os.path.join(config_dir(), "updates")
+                setup = updates.download(info["installer"], folder, progress=prog)
+                if self.status.get("running"):
+                    raise RuntimeError("A job started while downloading. Update again when it's done.")
+                state("installing")
+                updates.launch(setup)
+            except OSError as e:               # 1223: the Windows permission prompt was declined
+                msg = ("Windows didn't give the installer permission" if getattr(e, "winerror", 0) == 1223
+                       else f"Couldn't start the installer: {e}")
+                state("error", message=msg)
+                self.push({"type": "toast", "level": "error", "message": msg})
+                return
+            except Exception as e:  # noqa: BLE001 - shown to the user
+                state("error", message=str(e) or "The update failed")
+                self.push({"type": "toast", "level": "error", "message": f"Update failed: {e}"})
+                return
+            self._stop_measuring.set()
+            # close the app so the installer can replace its files; it reopens Boxset after
+            threading.Timer(1.0, self._quit_for_update).start()
+        threading.Thread(target=run, daemon=True).start()
+        return {"ok": True}
+
+    def _quit_for_update(self):
+        threading.Timer(10.0, lambda: os._exit(0)).start()   # in case the window doesn't close
+        if self.window is not None:
+            try:
+                self.window.destroy()
+                return
+            except Exception:  # noqa: BLE001
+                pass
+        os._exit(0)
 
     def _trust_folder(self, folder):
         folders = self.settings.setdefault("trusted_theme_folders", [])
@@ -559,6 +633,8 @@ class Api:
             "burners": self._burner_state(),
             "version": __version__,
             "update": self.update,
+            "update_state": dict(self.update_state),
+            "can_self_update": updates.can_install(),
         }
 
     @staticmethod

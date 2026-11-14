@@ -106,6 +106,15 @@ The installer also sets up file types: double-clicking a `.boxset` project opens
 Boxset, and double-clicking a `.boxtheme` theme pack installs it. Uninstall from
 **Settings → Apps**; your projects in Documents are left alone.
 
+### Updating
+
+When a new version is out, an **Update to x.y.z** button appears at the top right. Press
+it and Boxset downloads the new installer, checks it, closes, installs over itself and
+opens again on the same project. Your projects, settings and installed themes are kept.
+**Project → Check for updates** looks again at any time. (Updating from version 0.3.0 or
+older: download the new installer once and run it. There's no need to uninstall first;
+it installs over the old version.)
+
 ## Quick start
 
 1. **Films.** Drop your movie files (or a folder of them) into the window. Fix any titles
@@ -827,8 +836,10 @@ each time Boxset starts. Other programs and websites can't drive it or read your
 through it.
 
 **Updates.** When it starts, the app asks GitHub once whether a newer release exists and,
-if so, shows a note with a link. Nothing is downloaded or installed, and nothing about
-you or your films is sent. To switch the check off, add `"check_updates": false` to
+if so, shows an Update button. Nothing about you or your films is sent, and nothing is
+downloaded until you press it. Then only the installer attached to this project's own
+release is downloaded, and it's run only if its size and SHA-256 match what GitHub lists
+for it. To switch the check off, add `"check_updates": false` to
 `%APPDATA%\Boxset\settings.json`.
 
 ## Building from source

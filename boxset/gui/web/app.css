@@ -394,6 +394,11 @@ details summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
 
 .save-space { display: grid; gap: 6px; margin-top: -4px; }
 .update-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.update-acts { display: flex; gap: 6px; }
+.update-btn { color: var(--laser-text); border-color: rgba(110, 98, 245, .45); background: var(--laser-soft); }
+.update-btn:hover { background: rgba(110, 98, 245, .26); }
+.update-btn.busy, .update-btn.busy:disabled { opacity: 1; color: var(--text);
+  background: linear-gradient(90deg, rgba(110, 98, 245, .42) var(--pct, 100%), var(--surface-2) var(--pct, 100%)); }
 .save-space p { margin: 0 0 0 44px; color: var(--text-3); font-size: 12.5px; line-height: 1.45; }
 
 /* speed: a small rev gauge beside the choice */
