@@ -152,35 +152,58 @@ jobs:
         run: packaging/sign.ps1 (Get-ChildItem dist/BoxsetSetup-*.exe).FullName
 
       - name: Check that the in-app update installs over a running copy and reopens it
-        # Installs once just for this user into a folder with a space, opens Boxset, then runs
-        # the installer with exactly the switches the app's Update button uses (no folder, no
-        # install mode: it must find the old copy itself).
+        # Installs once just for this user into a folder with a space, then runs the installer
+        # with exactly the switches the app's Update button uses (no folder, no install mode:
+        # it must find the old copy itself): first with Boxset closed, then with it open.
         shell: pwsh
+        timeout-minutes: 12
         run: |
           $setup = (Get-ChildItem dist/BoxsetSetup-*.exe).FullName
           $dir = Join-Path $env:RUNNER_TEMP "Boxset update test"
-          $p = Start-Process $setup -ArgumentList '/VERYSILENT', '/SP-', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=`"$dir`"" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "First install failed ($($p.ExitCode))" }
+          $logs = Join-Path $env:RUNNER_TEMP "setup-logs"
+          New-Item -ItemType Directory -Force $logs | Out-Null
+          function Run-Setup($name, $switches) {
+            $log = Join-Path $logs "$name.log"
+            $p = Start-Process $setup -ArgumentList ($switches + "/LOG=`"$log`"") -PassThru
+            if (-not $p.WaitForExit(240000)) {
+              Get-Content $log -ErrorAction SilentlyContinue | Select-Object -Last 40
+              $p | Stop-Process -Force
+              Get-Process | Where-Object { $_.MainWindowTitle } | Format-Table Id, ProcessName, MainWindowTitle -AutoSize | Out-String | Write-Host
+              throw "$name didn't finish within 4 minutes"
+            }
+            if ($p.ExitCode -ne 0) { Get-Content $log | Select-Object -Last 40; throw "$name failed ($($p.ExitCode))" }
+            Write-Host "$name finished"
+          }
+          Run-Setup "install" @('/VERYSILENT', '/SP-', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=`"$dir`"")
           if (-not (Test-Path "$dir\Boxset.exe")) { throw "Boxset wasn't installed where asked" }
-          Remove-Item "$dir\THIRD_PARTY_NOTICES.md"           # the update must put this back
           $env:BOXSET_NO_UPDATE_CHECK = "1"
-          Start-Process "$dir\Boxset.exe"
-          Start-Sleep 8
-          if (-not (Get-Process Boxset -ErrorAction SilentlyContinue)) { throw "Boxset didn't start" }
           $switches = @(python -c "from boxset import updates; print('\n'.join(updates.install_command('x')[1:]))")
           Write-Host "Update switches: $switches"
-          $p = Start-Process $setup -ArgumentList $switches -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "The update failed ($($p.ExitCode))" }
-          if (-not (Test-Path "$dir\THIRD_PARTY_NOTICES.md")) { throw "The update didn't go into the existing folder" }
-          if (Test-Path "${env:ProgramFiles}\Boxset\Boxset.exe") { throw "The update made a second copy in Program Files" }
-          Start-Sleep 8
-          $running = Get-Process Boxset -ErrorAction SilentlyContinue
-          if (-not $running) { throw "Boxset didn't open again after the update" }
-          Write-Host "Reopened: $($running.Path)"
-          $running | Stop-Process -Force
-          Start-Sleep 2
+
+          foreach ($open in @($false, $true)) {
+            Remove-Item "$dir\THIRD_PARTY_NOTICES.md"           # the update must put this back
+            if ($open) {
+              Start-Process "$dir\Boxset.exe"
+              Start-Sleep 8
+              if (-not (Get-Process Boxset -ErrorAction SilentlyContinue)) { throw "Boxset didn't start" }
+            }
+            Run-Setup ("update, Boxset " + ($(if ($open) { "open" } else { "closed" }))) $switches
+            if (-not (Test-Path "$dir\THIRD_PARTY_NOTICES.md")) { throw "The update didn't go into the existing folder" }
+            if (Test-Path "${env:ProgramFiles}\Boxset\Boxset.exe") { throw "The update made a second copy in Program Files" }
+            Start-Sleep 8
+            $running = Get-Process Boxset -ErrorAction SilentlyContinue
+            if (-not $running) { throw "Boxset didn't open again after the update" }
+            Write-Host "Reopened: $($running.Path)"
+            $running | Stop-Process -Force
+            Start-Sleep 3
+          }
           $p = Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait -PassThru
           Write-Host "Uninstalled ($($p.ExitCode))"
+
+      - name: Installer logs
+        if: always()
+        shell: pwsh
+        run: Get-ChildItem "$env:RUNNER_TEMP\setup-logs" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "== $($_.Name)"; Get-Content $_.FullName | Select-Object -Last 60 }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4
         with:
