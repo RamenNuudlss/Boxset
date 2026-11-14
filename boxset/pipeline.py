@@ -144,12 +144,22 @@ def describe(m) -> dict:
 
 # --------------------------------------------------------------------- menus
 
+def _file_id(path: str) -> str:
+    """Which file a film is, so swapping in a different file re-renders the menus."""
+    try:
+        st = os.stat(path)
+        return f"{os.path.abspath(path)}|{st.st_size}|{int(st.st_mtime)}"
+    except OSError:
+        return os.path.abspath(path)
+
+
 def _menu_fingerprint(coll, media) -> str:
     h = hashlib.sha256()
     h.update(json.dumps({"theme": coll.theme, "opts": coll.theme_options,
                          "order": coll.timeline_order,
                          "films": [[f.title, f.year, f.place, f.spinoff, media[f.number].chapters,
-                                    round(media[f.number].duration, 1)] for f in coll.films],
+                                    round(media[f.number].duration, 1), _file_id(media[f.number].path)]
+                                   for f in coll.films],
                          "extra": [{k: v for k, v in raw.items() if k != "file"}
                                    for raw in coll.extra.get("films", [])]},
                         sort_keys=True, default=str).encode())
