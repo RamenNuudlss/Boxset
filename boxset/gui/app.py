@@ -52,7 +52,11 @@ def main(project_path: str | None = None, browser: bool = False, port: int = 0):
     api.window = window
 
     def on_loaded():
-        # dropped files from Explorer arrive here with their full paths
+        # Dropped files from Explorer arrive here with their full paths. The handler sits on the
+        # "Drop to add" veil, which only catches the mouse while files are being dragged in, so
+        # dragging a film row to reorder never reaches Python. (It used to sit on the whole page,
+        # with a dragover handler too: every dragover, many a second, was serialized with the
+        # page under it and sent across, which froze the app while reordering.)
         try:
             from webview.dom import DOMEventHandler
 
@@ -65,8 +69,9 @@ def main(project_path: str | None = None, browser: bool = False, port: int = 0):
                     except RuntimeError as err:
                         api.push({"type": "toast", "level": "error", "message": str(err)})
 
-            window.dom.document.events.drop += DOMEventHandler(on_drop, True, True)
-            window.dom.document.events.dragover += DOMEventHandler(lambda e: None, True, True)
+            veil = window.dom.get_element("#dropVeil")
+            if veil is not None:
+                veil.events.drop += DOMEventHandler(on_drop, True, False)
         except Exception:
             pass
 
