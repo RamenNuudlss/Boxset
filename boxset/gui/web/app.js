@@ -1069,21 +1069,32 @@ document.addEventListener("mouseover", (ev) => {
 });
 
 /* ------------------------------------------------- film reordering by dragging */
-let dragFrom = null;
+let dragFrom = null, dropMark = null;               // dropMark: [row element, "drop-before" | "drop-after"]
+function markDrop(row, side) {
+  if (dropMark && dropMark[0] === row && dropMark[1] === side) return;   // nothing changed: touch nothing
+  if (dropMark) dropMark[0].classList.remove(dropMark[1]);
+  dropMark = row ? [row, side] : null;
+  if (row) row.classList.add(side);
+}
 document.addEventListener("mousedown", (ev) => {
   const g = ev.target.closest && ev.target.closest("[data-grip]");
   if (g) g.closest(".film-row").draggable = true;
+});
+document.addEventListener("mouseup", () => {
+  if (dragFrom == null) $$(".film-row[draggable=true]").forEach((r) => (r.draggable = false));
 });
 document.addEventListener("dragstart", (ev) => {
   const row = ev.target.closest && ev.target.closest(".film-row");
   if (!row) return;
   dragFrom = +row.dataset.i;
+  dropMark = null;
   row.classList.add("dragging");
   ev.dataTransfer.effectAllowed = "move";
   ev.dataTransfer.setData("text/x-boxset-row", String(dragFrom));
 });
 document.addEventListener("dragend", () => {
-  $$(".film-row").forEach((r) => { r.draggable = false; r.classList.remove("dragging", "drop-before", "drop-after"); });
+  markDrop(null);
+  $$(".film-row").forEach((r) => { r.draggable = false; r.classList.remove("dragging"); });
   dragFrom = null;
 });
 
@@ -1093,27 +1104,29 @@ const hasFiles = (ev) => ev.dataTransfer && [...(ev.dataTransfer.types || [])].i
 document.addEventListener("dragover", (ev) => {
   if (dragFrom != null) {
     const row = ev.target.closest && ev.target.closest(".film-row");
-    $$(".film-row").forEach((r) => r.classList.remove("drop-before", "drop-after"));
     if (row) {
       ev.preventDefault();
+      ev.dataTransfer.dropEffect = "move";
       const r = row.getBoundingClientRect();
-      row.classList.add(ev.clientY < r.top + r.height / 2 ? "drop-before" : "drop-after");
-    }
+      markDrop(row, ev.clientY < r.top + r.height / 2 ? "drop-before" : "drop-after");
+    } else markDrop(null);
     return;
   }
   if (!hasFiles(ev)) return;
   ev.preventDefault();
+  // The veil covers the window while files are dragged in, so the drop lands on it (the desktop
+  // app listens there for the files' full paths).
   $("#dropVeil").hidden = false;
   clearTimeout(veilTimer);
   veilTimer = setTimeout(() => ($("#dropVeil").hidden = true), 250);
 });
 document.addEventListener("drop", (ev) => {
   if (dragFrom != null) {
-    const row = ev.target.closest && ev.target.closest(".film-row");
-    if (row) {
-      ev.preventDefault();
-      const r = row.getBoundingClientRect();
-      let to = +row.dataset.i + (ev.clientY < r.top + r.height / 2 ? 0 : 1);
+    ev.preventDefault();
+    const mark = dropMark;
+    markDrop(null);
+    if (mark) {
+      let to = +mark[0].dataset.i + (mark[1] === "drop-before" ? 0 : 1);
       if (to > dragFrom) to -= 1;
       if (to !== dragFrom) { openRow = null; editAct("move_film", dragFrom, to); }
     }
@@ -1122,7 +1135,6 @@ document.addEventListener("drop", (ev) => {
   if (!hasFiles(ev)) return;
   ev.preventDefault();
   $("#dropVeil").hidden = true;
-  // In the desktop app the window hands dropped files (with their full paths) to the engine.
   if (!S.native) toast("Dragging files in works in the desktop app. Use Add files here.", "info");
 });
 
